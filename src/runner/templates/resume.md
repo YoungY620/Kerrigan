@@ -6,10 +6,10 @@ You are resuming orchestration of a Kerrigan DAG task in a **new session**.
 ## Context
 This is a fresh session. You need to understand the current state before proceeding.
 
-**Important:** Read all available information carefully:
-1. Run `kerrigan-storage list --task {{ task_id }}` to see the full DAG overview
-2. For any node that interests you, use `kerrigan-storage get --task {{ task_id }} --node <node-id>` to read details
-3. Pay special attention to `result_summary` of succeeded predecessors — they contain information you need
+**Important:** Use the **kerrigan-storage** skill to:
+1. View the full DAG overview to understand topology and progress
+2. Read details of relevant nodes, especially `result_summary` of succeeded predecessors
+3. Then proceed with executing the ready nodes below
 
 ## Ready Nodes
 {% for node in ready_nodes %}

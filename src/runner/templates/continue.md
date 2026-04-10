@@ -7,4 +7,4 @@ New ready nodes are available. Continue orchestrating.
 - **{{ node.id }}**: {{ node.summary }}
 {% endfor %}
 
-Use `kerrigan-storage get --task {{ task_id }} --node <node-id>` to read details and predecessor results, then execute each node via subagent and update status.
+Use the **kerrigan-storage** skill to read node details, execute via subagent, and update status.

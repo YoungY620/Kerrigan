@@ -101,7 +101,7 @@ mod tests {
     fn init_template_renders() {
         let result = render_init("task-abc", "Refactor auth module", &sample_nodes());
         assert!(result.contains("Refactor auth module"));
-        assert!(result.contains("task-abc"));
+        assert!(result.contains("kerrigan-storage"));
         assert!(result.contains("n1"));
         assert!(result.contains("Analyze code"));
         assert!(result.contains("n2"));

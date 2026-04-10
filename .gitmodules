@@ -1,0 +1,3 @@
+[submodule "kerrigan-cli"]
+	path = kerrigan-cli
+	url = ssh://git@github.com/YoungY620:30022/harness/kerrigan-cli.git

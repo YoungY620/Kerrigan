@@ -97,7 +97,7 @@ Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session �
 
 初始化一个任务后，Kerrigan 框架准备好标准的文件系统，然后进入循环。
 
-同一任务内所有轮次复用同一个 agent session（除非中断后 resume，则开新 session）。每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 Storage skill 来获取节点详情、执行任务、回写结果。
+同一任务内所有轮次复用同一个 agent session。每经过 N 次 continue turn（默认 N=10）后，主动更换为新 session 并使用 resume 模板恢复上下文，避免单个 session 上下文过长导致质量下降。中断停机后恢复同样开新 session。每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 Storage skill 来获取节点详情、执行任务、回写结果。
 
 每轮 agent 执行完成后，kerrigan 程序侧对 DAG 进行静态一致性检查：
 - 前驱为空的节点是否为 Ready 状态

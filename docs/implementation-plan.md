@@ -262,7 +262,7 @@ kerrigan run <task-id> --adapter claude
 - 失败不传播，循环继续
 - 衍生任务正确插入
 - 留言板注入
-- session 复用：同一任务内所有轮次使用同一 session，中断后 resume 开新 session
+- session 复用：同一任务内复用 session，每 N 次（默认 10）continue turn 后主动换新 session resume，中断恢复同样开新 session
 - 静态检查：前驱为空的节点必须 Ready、Ready 节点无未完成前驱、完成节点必须有结果、必要字段非空
 - 修复循环：检查不通过时 resume 同一 session 要求修正，直到一致
 

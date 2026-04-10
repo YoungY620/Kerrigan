@@ -91,7 +91,7 @@ DAG 引擎统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 ta
 - 支持指定 skills 目录
 - 默认开启 YOLO 模式（自动批准所有工具调用，无需人工确认），agent 子任务需要全自动执行
 
-运行时根据时间等随机因素生成不会重复的 session id 并记录。可在任务的 metadata 中记录使用过的 session id 列表，用于 debug。
+Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session 机制），kerrigan 不做 session 归一化存储，只在 `sessions.json` 中记录 node_id 与 agent session id 的映射关系，用于 debug 追溯。
 
 ### Loop of Agent Loop
 

@@ -154,7 +154,7 @@ pub trait AgentAdapter {
 - 支持 session id 指定和 resume
 - 支持 skills 目录注入
 
-**Session 管理**：`krg_{timestamp}_{random}`，记录到 `~/.kerrigan/tasks/<task-id>/sessions.json`
+**Session 记录**：每个 node 执行时由 agent CLI 自行创建和管理 session（claude/kimi 各自的 session 机制），kerrigan 只在 `~/.kerrigan/tasks/<task-id>/sessions.json` 中记录 node_id 与 agent session id 的映射关系，用于 debug 追溯，不做 session 归一化存储
 
 **测试要点**：
 - trait 可 mock：用 MockAdapter 测试上层逻辑

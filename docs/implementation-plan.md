@@ -115,7 +115,7 @@ kerrigan-dag get --task <task-id> --node <node-id>                   # get_node,
 
 ### Step 3: Agent Adapter（kerrigan-cli）
 
-**目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，支持 Claude Code 作为首个 adapter。
+**目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，首批支持 Claude Code 和 Kimi CLI 两个 adapter，默认 YOLO 模式。
 
 **文件**：
 
@@ -129,6 +129,7 @@ kerrigan-cli/
 │   │   ├── mod.rs
 │   │   ├── traits.rs      # AgentAdapter trait
 │   │   ├── claude.rs      # Claude Code adapter
+│   │   ├── kimi.rs        # Kimi CLI adapter
 │   │   └── session.rs     # session id 生成与管理
 │   └── cli/
 │       └── mod.rs
@@ -144,17 +145,23 @@ pub trait AgentAdapter {
 ```
 
 **Claude Code adapter**：
-- 调用 `claude --print --session-id <id> --prompt <prompt>` 非交互式模式
+- 调用 `claude --print --session-id <id> --prompt <prompt> --dangerously-skip-permissions` 非交互式 YOLO 模式
 - 支持 `--allowedTools` 和 skills 注入
 - 解析 stdout 为 AgentOutput
+
+**Kimi CLI adapter**：
+- 调用 `kimi` 的非交互式模式，YOLO 默认开启
+- 支持 session id 指定和 resume
+- 支持 skills 目录注入
 
 **Session 管理**：`krg_{timestamp}_{random}`，记录到 `~/.kerrigan/tasks/<task-id>/sessions.json`
 
 **测试要点**：
 - trait 可 mock：用 MockAdapter 测试上层逻辑
 - session id 唯一性
-- Claude adapter 命令行构造正确性（不真实调用）
-- 可选集成测试
+- Claude adapter 命令行构造正确性（验证 YOLO 标志、session id 等参数）
+- Kimi adapter 命令行构造正确性
+- 可选集成测试（需要 claude/kimi 可用）
 
 **验证方式**：`cargo test`
 

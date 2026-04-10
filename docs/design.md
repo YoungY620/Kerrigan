@@ -84,11 +84,12 @@ DAG 引擎统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 ta
 
 ### Agent Adapter
 
-封装 agent CLI 的两个核心能力：subagent 调用和 session 管理。
+封装 agent CLI 的两个核心能力：subagent 调用和 session 管理。首批支持 Claude Code 和 Kimi CLI 两个 adapter。
 
 - 非交互式 prompt 下发，支持 subagent，支持指定 session id（便于后续 resume）
 - 在指定的 session id 上 resume
 - 支持指定 skills 目录
+- 默认开启 YOLO 模式（自动批准所有工具调用，无需人工确认），agent 子任务需要全自动执行
 
 运行时根据时间等随机因素生成不会重复的 session id 并记录。可在任务的 metadata 中记录使用过的 session id 列表，用于 debug。
 

@@ -23,7 +23,11 @@ fn init_idempotent() {
 #[test]
 fn init_deploys_skill() {
     let (tmp, engine) = setup();
-    let skill_path = tmp.path().join("skills").join("kerrigan-storage").join("SKILL.md");
+    let skill_path = tmp
+        .path()
+        .join("skills")
+        .join("kerrigan-storage")
+        .join("SKILL.md");
     assert!(skill_path.exists(), "SKILL.md should be deployed on init");
     let content = std::fs::read_to_string(&skill_path).unwrap();
     assert!(content.contains("name: kerrigan-storage"));
@@ -32,7 +36,11 @@ fn init_deploys_skill() {
 #[test]
 fn init_updates_skill_on_reinit() {
     let (tmp, engine) = setup();
-    let skill_path = tmp.path().join("skills").join("kerrigan-storage").join("SKILL.md");
+    let skill_path = tmp
+        .path()
+        .join("skills")
+        .join("kerrigan-storage")
+        .join("SKILL.md");
     // Overwrite with garbage
     std::fs::write(&skill_path, "old content").unwrap();
     // Re-init should restore

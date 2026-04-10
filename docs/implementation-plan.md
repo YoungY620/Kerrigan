@@ -191,15 +191,19 @@ kerrigan-cli/src/
 
 **主循环**：
 
+kerrigan 不自行遍历节点分发执行，而是每轮调用一个主 agent，由 agent 通过 DAG skills 自行读取 ready 节点、用 subagent 并行执行、回写结果。kerrigan 的 loop 只负责反复"踢"主 agent。
+
 ```text
 loop {
-    ready = kerrigan-dag list_ready(task_id)
+    ready = kerrigan-dag ready(task_id)  // 仅用于检查终止条件
     if ready.is_empty() { break }
-    for node in ready {
-        // 构造 prompt（注入前置节点的 result_summary）
-        // 通过 adapter 启动 subagent
-        // 解析结果，调用 kerrigan-dag update_nodes()
-    }
+
+    // 调用一个主 agent，注入 DAG skills + 提示词模板
+    // agent 内部自行：
+    //   1. 通过 kerrigan-dag ready/get 读取可执行节点和前置结果
+    //   2. 用 subagent 并行执行各 ready 节点
+    //   3. 通过 kerrigan-dag update/add 回写结果、衍生新节点
+    adapter.run(prompt, session_id, skills_dir)
 }
 ```
 

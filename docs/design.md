@@ -22,7 +22,7 @@
 2. 相应的 skills
 3. 一个 agent adapter，使任何 agent CLI（kimi-cli、claude code 等）只需支持 `--resume`、subagent 和非交互式调用即可接入，最好还支持自定义 skills 目录
 
-然后实现一个循环：skills 注入到系统提示词，每一轮要求模型使用 subagent 和 Kerrigan DAG skills 查找可执行节点并分发执行，直到可执行节点数量为 0。
+然后实现一个循环：每一轮调用一个主 agent（注入 DAG skills 到系统提示词），由该 agent 自行通过 DAG skills 查找可执行节点、用 subagent 并行执行、回写结果。kerrigan 的 loop 只负责检查终止条件（ready 节点为空）并反复调用主 agent，编排逻辑全在 agent 侧通过 skills 完成。
 
 ### DAG 引擎
 

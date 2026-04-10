@@ -1,4 +1,5 @@
 use kerrigan_storage::*;
+use std::thread;
 use tempfile::TempDir;
 
 fn setup() -> (TempDir, StorageEngine) {
@@ -380,4 +381,328 @@ fn add_node_with_completed_predecessors() {
     // Add B depending on already-succeeded A → B should be Ready immediately
     let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a]).unwrap();
     assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Ready);
+}
+
+// ── Concurrent task_create via threads ──
+
+#[test]
+fn concurrent_task_create() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let engine = StorageEngine::new(&root);
+    engine.init().unwrap();
+
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let r = root.clone();
+            thread::spawn(move || {
+                let e = StorageEngine::new(&r);
+                e.task_create(&format!("task-{i}"), "/tmp").unwrap()
+            })
+        })
+        .collect();
+
+    let ids: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    // All ids unique
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(unique.len(), 10);
+
+    // Registry has all 10
+    let tasks = engine.task_list().unwrap();
+    assert_eq!(tasks.len(), 10);
+}
+
+// ── Init preserves existing tasks ──
+
+#[test]
+fn init_preserves_existing_data() {
+    let (_tmp, engine) = setup();
+    engine.task_create("existing task", "/tmp").unwrap();
+    // Init again
+    engine.init().unwrap();
+    let tasks = engine.task_list().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].summary, "existing task");
+}
+
+// ── Empty DAG: list_all and list_ready return empty ──
+
+#[test]
+fn empty_dag() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+    assert!(engine.list_all(&task_id).unwrap().is_empty());
+    assert!(engine.list_ready(&task_id).unwrap().is_empty());
+}
+
+// ── Multiple independent ready nodes ──
+
+#[test]
+fn multiple_independent_ready_nodes() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![]).unwrap();
+    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
+
+    let ready = engine.list_ready(&task_id).unwrap();
+    assert_eq!(ready.len(), 3);
+    let ids: Vec<&str> = ready.iter().map(|n| n.id.as_str()).collect();
+    assert!(ids.contains(&a.as_str()));
+    assert!(ids.contains(&b.as_str()));
+    assert!(ids.contains(&c.as_str()));
+}
+
+// ── Running node is not Ready ──
+
+#[test]
+fn running_node_not_in_ready() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: a.clone(), status: Some(NodeStatus::Running), metadata: None,
+    }]).unwrap();
+
+    let ready = engine.list_ready(&task_id).unwrap();
+    assert!(ready.is_empty());
+
+    let node = engine.get_node(&task_id, &a).unwrap();
+    assert_eq!(node.status, NodeStatus::Running);
+}
+
+// ── update_nodes: metadata-only update (no status change) ──
+
+#[test]
+fn metadata_only_update() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: a.clone(),
+        status: None,
+        metadata: Some(NodeMetadata {
+            session_ids: vec!["sess_001".into()],
+            ..Default::default()
+        }),
+    }]).unwrap();
+
+    let node = engine.get_node(&task_id, &a).unwrap();
+    assert_eq!(node.status, NodeStatus::Ready); // unchanged
+    assert_eq!(node.metadata.session_ids, vec!["sess_001"]);
+}
+
+// ── Diamond DAG: A → B, A → C, B+C → D ──
+
+#[test]
+fn diamond_dag() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let d = engine.add_node(&task_id, NewNode { summary: "D".into(), description: "".into() }, vec![b.clone(), c.clone()]).unwrap();
+
+    // Only A is Ready
+    assert_eq!(engine.list_ready(&task_id).unwrap().len(), 1);
+
+    // Complete A → B and C become Ready
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: a, status: Some(NodeStatus::Succeeded), metadata: None,
+    }]).unwrap();
+    let ready = engine.list_ready(&task_id).unwrap();
+    assert_eq!(ready.len(), 2);
+    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+
+    // Complete B → D still Pending (C not done)
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: b, status: Some(NodeStatus::Succeeded), metadata: None,
+    }]).unwrap();
+    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+
+    // Complete C → D becomes Ready
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: c, status: Some(NodeStatus::Succeeded), metadata: None,
+    }]).unwrap();
+    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Ready);
+}
+
+// ── All state transitions ──
+
+#[test]
+fn valid_state_transitions() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    // Ready → Running → Succeeded
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Running), metadata: None }]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: a, status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
+
+    // Ready → Running → Failed
+    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: b.clone(), status: Some(NodeStatus::Running), metadata: None }]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: b, status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
+
+    // Ready → Succeeded (direct)
+    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: c, status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
+
+    // Ready → Failed (direct)
+    let d = engine.add_node(&task_id, NewNode { summary: "D".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: d, status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
+}
+
+#[test]
+fn invalid_transitions() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    // Pending → Running (invalid, must be Ready first)
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Pending);
+    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: b, status: Some(NodeStatus::Running), metadata: None }]).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
+
+    // Succeeded → anything (invalid)
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
+    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Failed), metadata: None }]).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
+
+    // Failed → anything (invalid)
+    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate { id: c.clone(), status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
+    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: c, status: Some(NodeStatus::Ready), metadata: None }]).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
+}
+
+// ── NodeSummary has correct fields ──
+
+#[test]
+fn node_summary_fields() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "do A".into(), description: "long desc".into() }, vec![]).unwrap();
+    let b = engine.add_node(&task_id, NewNode { summary: "do B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+
+    let all = engine.list_all(&task_id).unwrap();
+    let a_summary = all.iter().find(|n| n.id == a).unwrap();
+    assert_eq!(a_summary.summary, "do A");
+    assert_eq!(a_summary.successors, vec![b.clone()]);
+    assert_eq!(a_summary.status, NodeStatus::Ready);
+
+    let b_summary = all.iter().find(|n| n.id == b).unwrap();
+    assert_eq!(b_summary.summary, "do B");
+    assert!(b_summary.successors.is_empty());
+    assert_eq!(b_summary.status, NodeStatus::Pending);
+}
+
+// ── Spawned tasks in metadata ──
+
+#[test]
+fn spawned_tasks_metadata() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+
+    // Fail A with spawned retry task info
+    let retry = engine.add_node(&task_id, NewNode { summary: "retry A".into(), description: "".into() }, vec![]).unwrap();
+    engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: a.clone(),
+        status: Some(NodeStatus::Failed),
+        metadata: Some(NodeMetadata {
+            failure_reason: Some("timeout".into()),
+            spawned_tasks: vec![retry.clone()],
+            ..Default::default()
+        }),
+    }]).unwrap();
+
+    let node = engine.get_node(&task_id, &a).unwrap();
+    assert_eq!(node.metadata.failure_reason.as_deref(), Some("timeout"));
+    assert_eq!(node.metadata.spawned_tasks, vec![retry]);
+}
+
+// ── Persistence roundtrip: full DAG state survives reload ──
+
+#[test]
+fn persistence_full_dag_state() {
+    let (tmp, engine) = setup();
+    let task_id = engine.task_create("project", "/work").unwrap();
+
+    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "desc A".into() }, vec![]).unwrap();
+    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "desc B".into() }, vec![a.clone()]).unwrap();
+    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "desc C".into() }, vec![a.clone()]).unwrap();
+
+    engine.update_nodes(&task_id, vec![
+        NodeUpdate { id: a.clone(), status: Some(NodeStatus::Running), metadata: None },
+    ]).unwrap();
+    engine.update_nodes(&task_id, vec![
+        NodeUpdate {
+            id: a.clone(),
+            status: Some(NodeStatus::Succeeded),
+            metadata: Some(NodeMetadata {
+                result_summary: Some("A done".into()),
+                session_ids: vec!["sess_1".into()],
+                ..Default::default()
+            }),
+        },
+    ]).unwrap();
+
+    // Reload from disk
+    let engine2 = StorageEngine::new(tmp.path());
+
+    // Task registry intact
+    let tasks = engine2.task_list().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].summary, "project");
+
+    // Node A state
+    let na = engine2.get_node(&task_id, &a).unwrap();
+    assert_eq!(na.status, NodeStatus::Succeeded);
+    assert_eq!(na.metadata.result_summary.as_deref(), Some("A done"));
+    assert_eq!(na.metadata.session_ids, vec!["sess_1"]);
+    assert_eq!(na.successors.len(), 2);
+
+    // Nodes B and C should be Ready (cascaded after A succeeded)
+    assert_eq!(engine2.get_node(&task_id, &b).unwrap().status, NodeStatus::Ready);
+    assert_eq!(engine2.get_node(&task_id, &c).unwrap().status, NodeStatus::Ready);
+
+    // list_ready should return B and C
+    let ready = engine2.list_ready(&task_id).unwrap();
+    assert_eq!(ready.len(), 2);
+}
+
+// ── update_nodes on nonexistent node ──
+
+#[test]
+fn update_nonexistent_node() {
+    let (_tmp, engine) = setup();
+    let task_id = engine.task_create("t", "/tmp").unwrap();
+    let err = engine.update_nodes(&task_id, vec![NodeUpdate {
+        id: "ghost".into(), status: Some(NodeStatus::Running), metadata: None,
+    }]).unwrap_err();
+    assert!(matches!(err, StorageError::NodeNotFound(_)));
+}
+
+// ── Cross-task isolation: nodes in one task don't affect another ──
+
+#[test]
+fn cross_task_isolation() {
+    let (_tmp, engine) = setup();
+    let t1 = engine.task_create("task 1", "/tmp").unwrap();
+    let t2 = engine.task_create("task 2", "/tmp").unwrap();
+
+    engine.add_node(&t1, NewNode { summary: "A in T1".into(), description: "".into() }, vec![]).unwrap();
+    engine.add_node(&t1, NewNode { summary: "B in T1".into(), description: "".into() }, vec![]).unwrap();
+    engine.add_node(&t2, NewNode { summary: "X in T2".into(), description: "".into() }, vec![]).unwrap();
+
+    assert_eq!(engine.list_all(&t1).unwrap().len(), 2);
+    assert_eq!(engine.list_all(&t2).unwrap().len(), 1);
 }

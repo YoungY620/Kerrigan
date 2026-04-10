@@ -1,13 +1,12 @@
 use crate::error::{Result, StorageError};
 use fs2::FileExt;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fs;
 use std::path::Path;
 
 /// Atomic write: write to a temp file in the same directory, then rename.
 pub fn atomic_write(path: &Path, data: &impl Serialize) -> Result<()> {
-    let json =
-        serde_json::to_string_pretty(data).map_err(|e| StorageError::json(path, e))?;
+    let json = serde_json::to_string_pretty(data).map_err(|e| StorageError::json(path, e))?;
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, &json).map_err(|e| StorageError::io(&tmp, e))?;
     fs::rename(&tmp, path).map_err(|e| StorageError::io(path, e))?;

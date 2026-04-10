@@ -47,11 +47,15 @@ fn run(engine: StorageEngine, command: Command) -> kerrigan_storage::Result<()> 
             description,
             depends_on,
         } => {
-            let deps: Vec<String> = depends_on
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect();
-            let id = engine.add_node(&task, NewNode { summary, description }, deps)?;
+            let deps: Vec<String> = depends_on.into_iter().filter(|s| !s.is_empty()).collect();
+            let id = engine.add_node(
+                &task,
+                NewNode {
+                    summary,
+                    description,
+                },
+                deps,
+            )?;
             println!("{}", serde_json::json!({"node_id": id}));
         }
 

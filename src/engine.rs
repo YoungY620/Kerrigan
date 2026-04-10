@@ -18,8 +18,7 @@ impl StorageEngine {
 
     /// Default root: `~/.kerrigan/`.
     pub fn default_root() -> Result<Self> {
-        let home = std::env::var("HOME")
-            .map_err(|_| StorageError::NotInitialized)?;
+        let home = std::env::var("HOME").map_err(|_| StorageError::NotInitialized)?;
         Ok(Self::new(PathBuf::from(home).join(".kerrigan")))
     }
 
@@ -49,8 +48,7 @@ impl StorageEngine {
 
     /// Initialize `~/.kerrigan/` directory structure. Idempotent.
     pub fn init(&self) -> Result<()> {
-        fs::create_dir_all(self.root.join("tasks"))
-            .map_err(|e| StorageError::io(&self.root, e))?;
+        fs::create_dir_all(self.root.join("tasks")).map_err(|e| StorageError::io(&self.root, e))?;
 
         let reg_path = self.registry_path();
         if !reg_path.exists() {
@@ -68,8 +66,7 @@ impl StorageEngine {
 
         let task_id = uuid::Uuid::new_v4().to_string();
         let dir = self.task_dir(&task_id);
-        fs::create_dir_all(dir.join("shared"))
-            .map_err(|e| StorageError::io(&dir, e))?;
+        fs::create_dir_all(dir.join("shared")).map_err(|e| StorageError::io(&dir, e))?;
 
         // Create initial files
         persist::atomic_write(&self.dag_path(&task_id), &Dag::default())?;
@@ -283,13 +280,11 @@ fn cascade_ready(dag: &mut Dag, newly_succeeded: &[NodeId]) {
                 if succ.status != NodeStatus::Pending {
                     continue;
                 }
-                succ.predecessors
-                    .iter()
-                    .all(|pid| {
-                        dag.nodes
-                            .get(pid)
-                            .is_some_and(|p| p.status == NodeStatus::Succeeded)
-                    })
+                succ.predecessors.iter().all(|pid| {
+                    dag.nodes
+                        .get(pid)
+                        .is_some_and(|p| p.status == NodeStatus::Succeeded)
+                })
             };
 
             if all_preds_succeeded {
@@ -303,11 +298,7 @@ fn cascade_ready(dag: &mut Dag, newly_succeeded: &[NodeId]) {
     }
 }
 
-fn validate_transition(
-    node_id: &str,
-    from: NodeStatus,
-    to: NodeStatus,
-) -> Result<()> {
+fn validate_transition(node_id: &str, from: NodeStatus, to: NodeStatus) -> Result<()> {
     let valid = matches!(
         (from, to),
         (NodeStatus::Ready, NodeStatus::Running)

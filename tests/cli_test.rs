@@ -34,10 +34,7 @@ fn cli_init() {
 #[test]
 fn cli_init_idempotent() {
     let tmp = setup();
-    cmd(tmp.path())
-        .args(["init"])
-        .assert()
-        .success();
+    cmd(tmp.path()).args(["init"]).assert().success();
 }
 
 // ── Help ──
@@ -82,7 +79,14 @@ fn cli_task_create_and_list() {
 
     // Create
     let out = cmd(tmp.path())
-        .args(["task", "create", "--summary", "my task", "--workdir", "/tmp"])
+        .args([
+            "task",
+            "create",
+            "--summary",
+            "my task",
+            "--workdir",
+            "/tmp",
+        ])
         .assert()
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
@@ -91,10 +95,7 @@ fn cli_task_create_and_list() {
     assert!(!task_id.is_empty());
 
     // List
-    let out = cmd(tmp.path())
-        .args(["task", "list"])
-        .assert()
-        .success();
+    let out = cmd(tmp.path()).args(["task", "list"]).assert().success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     let tasks: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(tasks.as_array().unwrap().len(), 1);
@@ -202,10 +203,7 @@ fn cli_update_via_stdin() {
     let task_id = create_task(&tmp);
     let a = add_node(&tmp, &task_id, "A", "");
 
-    let json = format!(
-        r#"[{{"id":"{}","status":"succeeded"}}]"#,
-        a
-    );
+    let json = format!(r#"[{{"id":"{}","status":"succeeded"}}]"#, a);
     cmd(tmp.path())
         .args(["update", "--task", &task_id])
         .write_stdin(json)

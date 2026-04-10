@@ -33,11 +33,20 @@ pub enum Command {
         summary: String,
 
         /// Detailed description (markdown)
-        #[arg(long, default_value = "", help = "Detailed description and references (markdown format)")]
+        #[arg(
+            long,
+            default_value = "",
+            help = "Detailed description and references (markdown format)"
+        )]
         description: String,
 
         /// Comma-separated predecessor node IDs
-        #[arg(long, default_value = "", value_delimiter = ',', help = "Node IDs this node depends on (comma-separated)")]
+        #[arg(
+            long,
+            default_value = "",
+            value_delimiter = ',',
+            help = "Node IDs this node depends on (comma-separated)"
+        )]
         depends_on: Vec<String>,
     },
 
@@ -62,7 +71,10 @@ pub enum Command {
         task: String,
 
         /// JSON input: array of NodeUpdate objects. Read from stdin if omitted.
-        #[arg(long, help = "JSON array of updates, e.g. '[{\"id\":\"...\",\"status\":\"succeeded\"}]'. Reads from stdin if omitted.")]
+        #[arg(
+            long,
+            help = "JSON array of updates, e.g. '[{\"id\":\"...\",\"status\":\"succeeded\"}]'. Reads from stdin if omitted."
+        )]
         input: Option<String>,
     },
 
@@ -87,7 +99,11 @@ pub enum TaskCommand {
         summary: String,
 
         /// Working directory for the task
-        #[arg(long, default_value = ".", help = "Working directory path for this task")]
+        #[arg(
+            long,
+            default_value = ".",
+            help = "Working directory path for this task"
+        )]
         workdir: String,
     },
 

@@ -96,10 +96,24 @@ fn list_all_consistency() {
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
     let id1 = engine
-        .add_node(&task_id, NewNode { summary: "a".into(), description: "".into() }, vec![])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "a".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
         .unwrap();
     let id2 = engine
-        .add_node(&task_id, NewNode { summary: "b".into(), description: "".into() }, vec![id1.clone()])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "b".into(),
+                description: "".into(),
+            },
+            vec![id1.clone()],
+        )
         .unwrap();
 
     let all = engine.list_all(&task_id).unwrap();
@@ -118,10 +132,24 @@ fn dependency_pending_then_ready() {
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
     let a = engine
-        .add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
         .unwrap();
     let b = engine
-        .add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
         .unwrap();
 
     // B should be Pending (A not done yet)
@@ -154,31 +182,79 @@ fn multi_predecessor() {
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
     let a = engine
-        .add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
         .unwrap();
     let b = engine
-        .add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
         .unwrap();
     let c = engine
-        .add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![a.clone(), b.clone()])
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![a.clone(), b.clone()],
+        )
         .unwrap();
 
     // C is Pending
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Pending);
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete A only → C still Pending
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(), status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Pending);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("ok".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete B → C becomes Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: b.clone(), status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Ready);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("ok".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Ready
+    );
 }
 
 #[test]
@@ -186,34 +262,115 @@ fn cascade_chain() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![b.clone()]).unwrap();
-    let d = engine.add_node(&task_id, NewNode { summary: "D".into(), description: "".into() }, vec![c.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![b.clone()],
+        )
+        .unwrap();
+    let d = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "D".into(),
+                description: "".into(),
+            },
+            vec![c.clone()],
+        )
+        .unwrap();
 
     // Complete A → B becomes Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a, status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Ready);
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Pending);
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a,
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("ok".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &b).unwrap().status,
+        NodeStatus::Ready
+    );
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Pending
+    );
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete B → C becomes Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: b, status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Ready);
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b,
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("ok".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Ready
+    );
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete C → D becomes Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: c, status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Ready);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: c,
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("ok".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Ready
+    );
 }
 
 // ── DAG: Failure does not propagate ──
@@ -223,16 +380,46 @@ fn failure_no_propagation() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
     // Fail A → B stays Pending forever
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a, status: Some(NodeStatus::Failed),
-        metadata: Some(NodeMetadata { failure_reason: Some("broken".into()), ..Default::default() }),
-    }]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a,
+                status: Some(NodeStatus::Failed),
+                metadata: Some(NodeMetadata {
+                    failure_reason: Some("broken".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
 
-    assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Pending);
+    assert_eq!(
+        engine.get_node(&task_id, &b).unwrap().status,
+        NodeStatus::Pending
+    );
 }
 
 // ── DAG: Batch update ──
@@ -242,23 +429,66 @@ fn batch_update() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![]).unwrap();
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![a.clone(), b.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![a.clone(), b.clone()],
+        )
+        .unwrap();
 
     // Complete both A and B in one call → C should become Ready
-    engine.update_nodes(&task_id, vec![
-        NodeUpdate {
-            id: a, status: Some(NodeStatus::Succeeded),
-            metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-        },
-        NodeUpdate {
-            id: b, status: Some(NodeStatus::Succeeded),
-            metadata: Some(NodeMetadata { result_summary: Some("ok".into()), ..Default::default() }),
-        },
-    ]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![
+                NodeUpdate {
+                    id: a,
+                    status: Some(NodeStatus::Succeeded),
+                    metadata: Some(NodeMetadata {
+                        result_summary: Some("ok".into()),
+                        ..Default::default()
+                    }),
+                },
+                NodeUpdate {
+                    id: b,
+                    status: Some(NodeStatus::Succeeded),
+                    metadata: Some(NodeMetadata {
+                        result_summary: Some("ok".into()),
+                        ..Default::default()
+                    }),
+                },
+            ],
+        )
+        .unwrap();
 
-    assert_eq!(engine.get_node(&task_id, &c).unwrap().status, NodeStatus::Ready);
+    assert_eq!(
+        engine.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Ready
+    );
 }
 
 // ── DAG: list_ready ──
@@ -268,8 +498,26 @@ fn list_ready_filters() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let _b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let _b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
     let ready = engine.list_ready(&task_id).unwrap();
     assert_eq!(ready.len(), 1);
@@ -300,7 +548,10 @@ fn depends_on_nonexistent_node() {
     let err = engine
         .add_node(
             &task_id,
-            NewNode { summary: "A".into(), description: "".into() },
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
             vec!["ghost".into()],
         )
         .unwrap_err();
@@ -311,17 +562,40 @@ fn depends_on_nonexistent_node() {
 fn invalid_state_transition() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
 
     // Succeed A first
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(), status: Some(NodeStatus::Succeeded), metadata: None,
-    }]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     // Try to transition Succeeded → Running (invalid)
-    let err = engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a, status: Some(NodeStatus::Running), metadata: None,
-    }]).unwrap_err();
+    let err = engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a,
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap_err();
     assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
 }
 
@@ -331,13 +605,40 @@ fn invalid_state_transition() {
 fn persistence_roundtrip() {
     let (tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "desc".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "desc".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(), status: Some(NodeStatus::Succeeded),
-        metadata: Some(NodeMetadata { result_summary: Some("result".into()), ..Default::default() }),
-    }]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("result".into()),
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
 
     // Create a new engine instance pointing to the same directory
     let engine2 = StorageEngine::new(tmp.path());
@@ -356,8 +657,26 @@ fn bidirectional_edges() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
     let a_node = engine.get_node(&task_id, &a).unwrap();
     assert!(a_node.successors.contains(&b));
@@ -373,14 +692,42 @@ fn add_node_with_completed_predecessors() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(), status: Some(NodeStatus::Succeeded), metadata: None,
-    }]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     // Add B depending on already-succeeded A → B should be Ready immediately
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Ready);
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &b).unwrap().status,
+        NodeStatus::Ready
+    );
 }
 
 // ── Concurrent task_create via threads ──
@@ -442,9 +789,36 @@ fn multiple_independent_ready_nodes() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![]).unwrap();
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
 
     let ready = engine.list_ready(&task_id).unwrap();
     assert_eq!(ready.len(), 3);
@@ -461,10 +835,26 @@ fn running_node_not_in_ready() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(), status: Some(NodeStatus::Running), metadata: None,
-    }]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     let ready = engine.list_ready(&task_id).unwrap();
     assert!(ready.is_empty());
@@ -480,15 +870,29 @@ fn metadata_only_update() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(),
-        status: None,
-        metadata: Some(NodeMetadata {
-            session_ids: vec!["sess_001".into()],
-            ..Default::default()
-        }),
-    }]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: None,
+                metadata: Some(NodeMetadata {
+                    session_ids: vec!["sess_001".into()],
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
 
     let node = engine.get_node(&task_id, &a).unwrap();
     assert_eq!(node.status, NodeStatus::Ready); // unchanged
@@ -502,33 +906,99 @@ fn diamond_dag() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![a.clone()]).unwrap();
-    let d = engine.add_node(&task_id, NewNode { summary: "D".into(), description: "".into() }, vec![b.clone(), c.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
+    let d = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "D".into(),
+                description: "".into(),
+            },
+            vec![b.clone(), c.clone()],
+        )
+        .unwrap();
 
     // Only A is Ready
     assert_eq!(engine.list_ready(&task_id).unwrap().len(), 1);
 
     // Complete A → B and C become Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a, status: Some(NodeStatus::Succeeded), metadata: None,
-    }]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a,
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
     let ready = engine.list_ready(&task_id).unwrap();
     assert_eq!(ready.len(), 2);
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete B → D still Pending (C not done)
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: b, status: Some(NodeStatus::Succeeded), metadata: None,
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Pending);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b,
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Pending
+    );
 
     // Complete C → D becomes Ready
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: c, status: Some(NodeStatus::Succeeded), metadata: None,
-    }]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &d).unwrap().status, NodeStatus::Ready);
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: c,
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &d).unwrap().status,
+        NodeStatus::Ready
+    );
 }
 
 // ── All state transitions ──
@@ -539,22 +1009,112 @@ fn valid_state_transitions() {
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
     // Ready → Running → Succeeded
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Running), metadata: None }]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: a, status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a,
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     // Ready → Running → Failed
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: b.clone(), status: Some(NodeStatus::Running), metadata: None }]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: b, status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b.clone(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b,
+                status: Some(NodeStatus::Failed),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     // Ready → Succeeded (direct)
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: c, status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: c,
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 
     // Ready → Failed (direct)
-    let d = engine.add_node(&task_id, NewNode { summary: "D".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: d, status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
+    let d = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "D".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: d,
+                status: Some(NodeStatus::Failed),
+                metadata: None,
+            }],
+        )
+        .unwrap();
 }
 
 #[test]
@@ -563,21 +1123,96 @@ fn invalid_transitions() {
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
     // Pending → Running (invalid, must be Ready first)
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "".into() }, vec![a.clone()]).unwrap();
-    assert_eq!(engine.get_node(&task_id, &b).unwrap().status, NodeStatus::Pending);
-    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: b, status: Some(NodeStatus::Running), metadata: None }]).unwrap_err();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.get_node(&task_id, &b).unwrap().status,
+        NodeStatus::Pending
+    );
+    let err = engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: b,
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap_err();
     assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
 
     // Succeeded → anything (invalid)
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Succeeded), metadata: None }]).unwrap();
-    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: a.clone(), status: Some(NodeStatus::Failed), metadata: None }]).unwrap_err();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    let err = engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Failed),
+                metadata: None,
+            }],
+        )
+        .unwrap_err();
     assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
 
     // Failed → anything (invalid)
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate { id: c.clone(), status: Some(NodeStatus::Failed), metadata: None }]).unwrap();
-    let err = engine.update_nodes(&task_id, vec![NodeUpdate { id: c, status: Some(NodeStatus::Ready), metadata: None }]).unwrap_err();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: c.clone(),
+                status: Some(NodeStatus::Failed),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    let err = engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: c,
+                status: Some(NodeStatus::Ready),
+                metadata: None,
+            }],
+        )
+        .unwrap_err();
     assert!(matches!(err, StorageError::InvalidStateTransition { .. }));
 }
 
@@ -588,8 +1223,26 @@ fn node_summary_fields() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "do A".into(), description: "long desc".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "do B".into(), description: "".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "do A".into(),
+                description: "long desc".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "do B".into(),
+                description: "".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
     let all = engine.list_all(&task_id).unwrap();
     let a_summary = all.iter().find(|n| n.id == a).unwrap();
@@ -610,19 +1263,42 @@ fn spawned_tasks_metadata() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "".into() }, vec![]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
 
     // Fail A with spawned retry task info
-    let retry = engine.add_node(&task_id, NewNode { summary: "retry A".into(), description: "".into() }, vec![]).unwrap();
-    engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: a.clone(),
-        status: Some(NodeStatus::Failed),
-        metadata: Some(NodeMetadata {
-            failure_reason: Some("timeout".into()),
-            spawned_tasks: vec![retry.clone()],
-            ..Default::default()
-        }),
-    }]).unwrap();
+    let retry = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "retry A".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Failed),
+                metadata: Some(NodeMetadata {
+                    failure_reason: Some("timeout".into()),
+                    spawned_tasks: vec![retry.clone()],
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
 
     let node = engine.get_node(&task_id, &a).unwrap();
     assert_eq!(node.metadata.failure_reason.as_deref(), Some("timeout"));
@@ -636,24 +1312,61 @@ fn persistence_full_dag_state() {
     let (tmp, engine) = setup();
     let task_id = engine.task_create("project", "/work").unwrap();
 
-    let a = engine.add_node(&task_id, NewNode { summary: "A".into(), description: "desc A".into() }, vec![]).unwrap();
-    let b = engine.add_node(&task_id, NewNode { summary: "B".into(), description: "desc B".into() }, vec![a.clone()]).unwrap();
-    let c = engine.add_node(&task_id, NewNode { summary: "C".into(), description: "desc C".into() }, vec![a.clone()]).unwrap();
+    let a = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "A".into(),
+                description: "desc A".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    let b = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "B".into(),
+                description: "desc B".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
+    let c = engine
+        .add_node(
+            &task_id,
+            NewNode {
+                summary: "C".into(),
+                description: "desc C".into(),
+            },
+            vec![a.clone()],
+        )
+        .unwrap();
 
-    engine.update_nodes(&task_id, vec![
-        NodeUpdate { id: a.clone(), status: Some(NodeStatus::Running), metadata: None },
-    ]).unwrap();
-    engine.update_nodes(&task_id, vec![
-        NodeUpdate {
-            id: a.clone(),
-            status: Some(NodeStatus::Succeeded),
-            metadata: Some(NodeMetadata {
-                result_summary: Some("A done".into()),
-                session_ids: vec!["sess_1".into()],
-                ..Default::default()
-            }),
-        },
-    ]).unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap();
+    engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("A done".into()),
+                    session_ids: vec!["sess_1".into()],
+                    ..Default::default()
+                }),
+            }],
+        )
+        .unwrap();
 
     // Reload from disk
     let engine2 = StorageEngine::new(tmp.path());
@@ -671,8 +1384,14 @@ fn persistence_full_dag_state() {
     assert_eq!(na.successors.len(), 2);
 
     // Nodes B and C should be Ready (cascaded after A succeeded)
-    assert_eq!(engine2.get_node(&task_id, &b).unwrap().status, NodeStatus::Ready);
-    assert_eq!(engine2.get_node(&task_id, &c).unwrap().status, NodeStatus::Ready);
+    assert_eq!(
+        engine2.get_node(&task_id, &b).unwrap().status,
+        NodeStatus::Ready
+    );
+    assert_eq!(
+        engine2.get_node(&task_id, &c).unwrap().status,
+        NodeStatus::Ready
+    );
 
     // list_ready should return B and C
     let ready = engine2.list_ready(&task_id).unwrap();
@@ -685,9 +1404,16 @@ fn persistence_full_dag_state() {
 fn update_nonexistent_node() {
     let (_tmp, engine) = setup();
     let task_id = engine.task_create("t", "/tmp").unwrap();
-    let err = engine.update_nodes(&task_id, vec![NodeUpdate {
-        id: "ghost".into(), status: Some(NodeStatus::Running), metadata: None,
-    }]).unwrap_err();
+    let err = engine
+        .update_nodes(
+            &task_id,
+            vec![NodeUpdate {
+                id: "ghost".into(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }],
+        )
+        .unwrap_err();
     assert!(matches!(err, StorageError::NodeNotFound(_)));
 }
 
@@ -699,9 +1425,36 @@ fn cross_task_isolation() {
     let t1 = engine.task_create("task 1", "/tmp").unwrap();
     let t2 = engine.task_create("task 2", "/tmp").unwrap();
 
-    engine.add_node(&t1, NewNode { summary: "A in T1".into(), description: "".into() }, vec![]).unwrap();
-    engine.add_node(&t1, NewNode { summary: "B in T1".into(), description: "".into() }, vec![]).unwrap();
-    engine.add_node(&t2, NewNode { summary: "X in T2".into(), description: "".into() }, vec![]).unwrap();
+    engine
+        .add_node(
+            &t1,
+            NewNode {
+                summary: "A in T1".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .add_node(
+            &t1,
+            NewNode {
+                summary: "B in T1".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
+    engine
+        .add_node(
+            &t2,
+            NewNode {
+                summary: "X in T2".into(),
+                description: "".into(),
+            },
+            vec![],
+        )
+        .unwrap();
 
     assert_eq!(engine.list_all(&t1).unwrap().len(), 2);
     assert_eq!(engine.list_all(&t2).unwrap().len(), 1);

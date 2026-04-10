@@ -18,13 +18,13 @@
 
 上面的需求实际上只需要实现：
 
-1. 一个 DAG 的管理和维护引擎及相应的 CLI
+1. 一个 Storage 层（DAG 管理 + 存储）及相应的 CLI
 2. 相应的 skills
 3. 一个 agent adapter，使任何 agent CLI（kimi-cli、claude code 等）只需支持 `--resume`、subagent 和非交互式调用即可接入，最好还支持自定义 skills 目录
 
 然后实现一个循环：每一轮调用一个主 agent（注入 DAG skills 到系统提示词），由该 agent 自行通过 DAG skills 查找可执行节点、用 subagent 并行执行、回写结果。kerrigan 的 loop 只负责检查终止条件（ready 节点为空）并反复调用主 agent，编排逻辑全在 agent 侧通过 skills 完成。
 
-### DAG 引擎
+### Storage（DAG 引擎 + 存储管理）
 
 #### 任务数据模型
 
@@ -41,7 +41,7 @@
 
 #### 存储管理
 
-DAG 引擎统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 task id 调用，调用方不需要知道文件路径细节：
+Storage 层统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 task id 调用，调用方不需要知道文件路径细节：
 
 ```text
 ~/.kerrigan/
@@ -109,12 +109,12 @@ Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session �
 
 ### 跨任务打通
 
-不同任务之间分别管理各自的 DAG，通过 DAG 引擎的统一接口（`task_list`、`task_create` 等）统一管理。存储结构和注册表由 DAG 引擎层维护（见上文"存储管理"），Kerrigan CLI 基于这些接口实现上层编排，所有任务在后台执行，用户通过 CLI 查询和维护。
+不同任务之间分别管理各自的 DAG，通过 Storage 的统一接口（`task_list`、`task_create` 等）统一管理。存储结构和注册表由 Storage 层维护（见上文"存储管理"），Kerrigan CLI 基于这些接口实现上层编排，所有任务在后台执行，用户通过 CLI 查询和维护。
 
 ### Skills
 
 两个层次的 skills：
 
-1. **DAG 引擎 skills**：DAG 引擎封装为 skills，供 Kerrigan loop 中调用的 agent CLI 使用
+1. **Storage skills**：Storage CLI 封装为 skills，供 Kerrigan loop 中调用的 agent CLI 使用
 2. **Kerrigan CLI skills**：Kerrigan CLI 封装为 skills，供外部任何 agent 使用，用于部署后台服务，或直接适配到 chatbot
    - 是否需要一个 SDK（优先级非常低）

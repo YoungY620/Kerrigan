@@ -6,21 +6,21 @@
 
 **Repo 结构**：
 
-- `kerrigan-dag-engine`（独立 repo/submodule）：DAG 引擎核心库 + CLI，包含 `~/.kerrigan/` 存储管理、任务注册表、DAG 图维护，所有接口基于 id
-- `kerrigan-cli`（独立 repo/submodule）：编排层，依赖 kerrigan-dag-engine，包含 agent adapter、主循环、skills
+- `kerrigan-storage`（独立 repo/submodule）：Storage 核心库 + CLI，包含 `~/.kerrigan/` 存储管理、任务注册表、DAG 图维护，所有接口基于 id
+- `kerrigan-cli`（独立 repo/submodule）：编排层，依赖 kerrigan-storage，包含 agent adapter、主循环、skills
 
 核心原则：每一步高内聚、充分测试、对外接口承诺绝对有效。
 
 ## 步骤
 
-### Step 1: DAG 引擎核心库 + 存储管理（kerrigan-dag-engine）
+### Step 1: Storage 核心库 + 存储管理（kerrigan-storage）
 
-**目标**：实现 DAG 引擎的纯库层，包含 `~/.kerrigan/` 目录管理、任务注册表、DAG 图操作，所有接口基于 id，带完整单元测试。
+**目标**：实现 Storage的纯库层，包含 `~/.kerrigan/` 目录管理、任务注册表、DAG 图操作，所有接口基于 id，带完整单元测试。
 
 **文件**：
 
 ```text
-kerrigan-dag-engine/
+kerrigan-storage/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
@@ -72,14 +72,14 @@ DAG 操作（所有接口通过 task_id 定位 dag.json）：
 
 ---
 
-### Step 2: DAG CLI（kerrigan-dag-engine）
+### Step 2: DAG CLI（kerrigan-storage）
 
-**目标**：在同一 repo 中为 DAG 引擎提供 CLI 入口，所有接口基于 id，JSON 输出，可被 agent skills 直接调用。
+**目标**：在同一 repo 中为 Storage提供 CLI 入口，所有接口基于 id，JSON 输出，可被 agent skills 直接调用。
 
 **文件**：
 
 ```text
-kerrigan-dag-engine/src/
+kerrigan-storage/src/
 ├── main.rs
 ├── cli.rs
 ```
@@ -87,15 +87,15 @@ kerrigan-dag-engine/src/
 **CLI 接口**：
 
 ```bash
-kerrigan-dag init                                                    # 初始化 ~/.kerrigan/
-kerrigan-dag task create --summary "..." --workdir .                 # 创建任务
-kerrigan-dag task list                                               # 列出所有任务
+kerrigan-storage init                                                    # 初始化 ~/.kerrigan/
+kerrigan-storage task create --summary "..." --workdir .                 # 创建任务
+kerrigan-storage task list                                               # 列出所有任务
 
-kerrigan-dag add --task <task-id> --summary "..." --description "..." --depends-on n1,n2
-kerrigan-dag list --task <task-id>                                   # list_all, JSON output
-kerrigan-dag ready --task <task-id>                                  # list_ready, JSON output
-kerrigan-dag update --task <task-id> --input <json>                  # update_nodes, JSON input
-kerrigan-dag get --task <task-id> --node <node-id>                   # get_node, JSON output
+kerrigan-storage add --task <task-id> --summary "..." --description "..." --depends-on n1,n2
+kerrigan-storage list --task <task-id>                                   # list_all, JSON output
+kerrigan-storage ready --task <task-id>                                  # list_ready, JSON output
+kerrigan-storage update --task <task-id> --input <json>                  # update_nodes, JSON input
+kerrigan-storage get --task <task-id> --node <node-id>                   # get_node, JSON output
 ```
 
 - 所有输出为 JSON（方便 agent 解析）
@@ -121,7 +121,7 @@ kerrigan-dag get --task <task-id> --node <node-id>                   # get_node,
 
 ```text
 kerrigan-cli/
-├── Cargo.toml              # 依赖 kerrigan-dag-engine
+├── Cargo.toml              # 依赖 kerrigan-storage
 ├── src/
 │   ├── lib.rs
 │   ├── main.rs
@@ -195,7 +195,7 @@ kerrigan 不自行遍历节点分发执行，而是每轮调用一个主 agent�
 
 ```text
 loop {
-    ready = kerrigan-dag ready(task_id)  // 仅用于检查终止条件
+    ready = kerrigan-storage ready(task_id)  // 仅用于检查终止条件
     if ready.is_empty() { break }
 
     // 构造本轮提示词：
@@ -227,22 +227,22 @@ kerrigan run <task-id> --adapter claude
 
 ### Step 5: Skills 封装
 
-**目标**：将 DAG 引擎和 Kerrigan CLI 封装为 skills。
+**目标**：将 Storage和 Kerrigan CLI 封装为 skills。
 
 **文件**（放在 monorepo 或 kerrigan-cli 下）：
 
 ```text
 skills/
-├── kerrigan-dag/
+├── kerrigan-storage/
 │   ├── SKILL.md           # DAG 操作 skill
-│   └── scripts/           # 调用 kerrigan-dag 子命令
+│   └── scripts/           # 调用 kerrigan-storage 子命令
 └── kerrigan-swarm/
     ├── SKILL.md           # 任务管理 skill
     └── scripts/           # 调用 kerrigan task/run
 ```
 
 两层 skills：
-1. **kerrigan-dag skills**：供 loop 内 agent 操作 DAG
+1. **kerrigan-storage skills**：供 loop 内 agent 操作 DAG
 2. **kerrigan-swarm skills**：供外部 agent 创建/管理后台任务
 
 **验证方式**：手动验证 + 可选集成测试
@@ -266,11 +266,11 @@ skills/
 ## 执行顺序
 
 ```text
-kerrigan-dag-engine:
-  Step 1 (引擎库 + 存储管理) → Step 2 (CLI)
+kerrigan-storage:
+  Step 1 (Storage 库 + 存储管理) → Step 2 (CLI)
 
 kerrigan-cli:
   Step 3 (Agent Adapter) → Step 4 (主循环) → Step 5 (Skills)
 ```
 
-Step 1-2 在 kerrigan-dag-engine repo 完成后，kerrigan-cli 通过 path 依赖引用。每一步完成后提交 + push。
+Step 1-2 在 kerrigan-storage repo 完成后，kerrigan-cli 通过 path 依赖引用。每一步完成后提交 + push。

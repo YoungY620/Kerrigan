@@ -17,17 +17,13 @@ fn env() -> Environment<'static> {
     env
 }
 
-/// Render the init template (first round of a new task).
-pub fn render_init(task_id: &str, task_summary: &str, ready_nodes: &[NodeSummary]) -> String {
+/// Render the init template (first round of a new task, with auto-created origin node).
+pub fn render_init(task_summary: &str, origin_node_id: &str) -> String {
     let env = env();
     let tmpl = env.get_template("init").unwrap();
     tmpl.render(context! {
-        task_id => task_id,
         task_summary => task_summary,
-        ready_nodes => ready_nodes.iter().map(|n| context! {
-            id => &n.id,
-            summary => &n.summary,
-        }).collect::<Vec<_>>(),
+        origin_node_id => origin_node_id,
     })
     .unwrap()
 }
@@ -99,13 +95,11 @@ mod tests {
 
     #[test]
     fn init_template_renders() {
-        let result = render_init("task-abc", "Refactor auth module", &sample_nodes());
+        let result = render_init("Refactor auth module", "origin-node-123");
         assert!(result.contains("Refactor auth module"));
+        assert!(result.contains("origin-node-123"));
         assert!(result.contains("kerrigan-storage"));
-        assert!(result.contains("n1"));
-        assert!(result.contains("Analyze code"));
-        assert!(result.contains("n2"));
-        assert!(result.contains("Write tests"));
+        assert!(result.contains("研究"));
     }
 
     #[test]

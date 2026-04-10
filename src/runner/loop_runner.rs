@@ -55,6 +55,21 @@ pub async fn run_loop(
     let mut turns_in_session: usize = 0;
     let mut is_first_round = true;
 
+    // Auto-create origin node if DAG is empty
+    let origin_node_id = if engine.list_all(&config.task_id)?.is_empty() {
+        let id = engine.add_node(
+            &config.task_id,
+            kerrigan_storage::NewNode {
+                summary: format!("研究：{}", config.task_summary),
+                description: config.task_summary.clone(),
+            },
+            vec![],
+        )?;
+        Some(id)
+    } else {
+        None
+    };
+
     loop {
         // Check termination: no ready nodes
         let ready = engine.list_ready(&config.task_id)?;
@@ -73,9 +88,11 @@ pub async fn run_loop(
         }
 
         // Build prompt
-        let prompt = if is_first_round && turns_in_session == 0 && round == 1 {
-            // Very first round
-            templates::render_init(&config.task_id, &config.task_summary, &ready)
+        let prompt = if let Some(ref origin_id) = origin_node_id
+            && round == 1
+        {
+            // Very first round: init with origin node
+            templates::render_init(&config.task_summary, origin_id)
         } else if is_first_round {
             // New session (after rotation or restart)
             templates::render_resume(&config.task_id, &config.task_summary, &ready)

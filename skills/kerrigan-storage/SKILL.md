@@ -11,6 +11,19 @@ compatibility: Requires kerrigan-storage binary in PATH
 
 Manage tasks and their DAG (Directed Acyclic Graph) of work nodes. All commands output JSON.
 
+## Installation
+
+```bash
+# Install all components (kerrigan-storage + kerrigan-cli)
+curl -fsSL https://github.com/YoungY620/harness/kerrigan/-/raw/main/install.sh | bash
+
+# Or install individually
+curl -fsSL https://github.com/YoungY620/harness/kerrigan-storage/-/raw/main/install.sh | bash
+curl -fsSL https://github.com/YoungY620/harness/kerrigan-cli/-/raw/main/install.sh | bash
+```
+
+Verify: `kerrigan-storage --version && kerrigan-cli --version`
+
 ## Quick Start
 
 ```bash

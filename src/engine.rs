@@ -32,7 +32,7 @@ impl StorageEngine {
         self.root.join("lock")
     }
 
-    fn task_dir(&self, task_id: &str) -> PathBuf {
+    pub fn task_dir(&self, task_id: &str) -> PathBuf {
         self.root.join("tasks").join(task_id)
     }
 

@@ -212,7 +212,6 @@ loop {
 
 ```bash
 kerrigan run <task-id> --adapter claude
-kerrigan run <task-id> --dry-run
 ```
 
 **测试要点**：
@@ -220,7 +219,6 @@ kerrigan run <task-id> --dry-run
 - 循环终止：mock adapter，DAG 全部完成后退出
 - 失败不传播，循环继续
 - 衍生任务正确插入
-- dry-run 不调用 adapter
 - 留言板注入
 
 **验证方式**：`cargo test` + mock adapter 端到端跑完 3 节点 DAG

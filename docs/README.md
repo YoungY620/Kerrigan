@@ -1,100 +1,100 @@
-# 设计一个没有通信的 Agent 间通信协议
+# Kerrigan: 一个无通信的 Agent 间协作协议
 
-## 为什么需要 multi-agent
+## 为什么需要 Multi-Agent
 
-如果不需要多智能体的话，也就不需要研究 agent 之间的通信了。
+即使仅仅是并行优化，多智能体也是有意义的。而且即使不考虑并行，**agent 运行的最佳状态是刚好看到所有它需要的上下文**（关键假设）。
 
-简单的结论是，即使仅仅是并行优化，也是有意义的。而且即使不考虑并行优化，**agent运行的最好状态就是刚好看到所有它需要的上下文。（关键假设）**
+后面的所有设计或多或少都基于这个假设（但这个假设也可能被推翻）。
 
-后面的所有设计或多或少都基于这个假设。（但这个假设也可能被推翻！）
+## 无通信的通信协议
 
-## 一个不需要通信的通信协议
+很多 multi-agent 架构的论文或框架不管叙事如何，都会涉及一个关键问题：agent 之间的通信复杂度。点对点通信、广播会导致上下文写放大，同时主动沟通还会打断另一个 agent 的正常工作（污染 session）。对人类来说这无法避免——这也是《人月神话》的核心。但对 agent 来说完全没有必要。
 
-很多multi-agent架构的论文或框架不管叙事如何，都会涉及到一个关键问题，就是agent之间的通信复杂度。agent间的点对点通信、广播会导致总体的上下文写放大，同时主动沟通还会打断另一个agent的正常工作（污染session）。这对于人类来说是无法避免的，这也是“人月神话“的核心。但是对agent来说其实是完全没有必要的。
+任何复杂度的任务最终都可以做任务分解。agent 间通信的原因一定是任务之间存在依赖，那么一定可以把复杂任务通过任务分解和依赖分析构建为一个有向无环图（DAG）。DAG 可以做拓扑排序——每一轮遍历整个图，找到所有没有前置依赖的任务节点，这些节点可以无依赖地并行执行。因此，只需要模型支持 subagent/task 功能，就可以实现复杂任务的拆分和并行执行。每个 subagent 执行具体小任务时拿到的是刚好足够的上下文。
 
-任何复杂度的任务，最终都可以做任务分解。agent间通信的原因一定是由于任务之间存在依赖。那么一定可以吧一个复杂任务通过任务分解和依赖分析构建出一个有向无环图（DAG）。DAG都可以做拓扑排序，而拓扑排序算法其实就是一轮一轮的遍历整个图找到所有没有前序依赖的任务节点，同时这些节点都可以无依赖并行执行。因此，技术上只需要要求模型支持subagent/task功能，就可以实现一个复杂任务的拆分和并行执行。每个subagent执行一个具体小任务的时候得到的是刚好足够的上下文。
+如果 agent 在执行中发现需要沟通，或从执行结果发现需要进一步的任务？任何任务都可以拆分为"沟通前"和"沟通后"。agent 只需停止当前任务，维护整个 DAG（增加/修改节点），下一轮继续按拓扑排序找到可并行的任务执行即可。
 
-如果agent在任务中见发现需要沟通，或者从执行结果发现需要进一步的任务执行？任何任务都可以拆分成需要沟通前和沟通后，agent需要沟通只需要停止当前的任务，然后维护整个DAG，增加/修改节点。在下一轮继续按照拓扑排序寻找可以无依赖并行的任务进行subagent执行就行了。
+## 维护 DAG
 
-## 维护DAG
+上面的需求实际上只需要实现：
 
-上面的需求实际上只需要实现一个dag的管理和维护引擎和相应的cli，然后实现相应的skills。另一方面实现一个agent adapter，任何（kimicli、claudecode）只需要支持--resume、subagent和非交互式调用即可，最好还支持自定义暂时安装skills或指定skills文件夹。然后实现一个循环，skills注入到系统提示词，每一轮指定要求模型使用subagent和 Kerrigan dag skills 查找可用的节点并执行，直到dag可执行节点数量为0。
+1. 一个 DAG 的管理和维护引擎及相应的 CLI
+2. 相应的 skills
+3. 一个 agent adapter，使任何 agent CLI（kimi-cli、claude code 等）只需支持 `--resume`、subagent 和非交互式调用即可接入，最好还支持自定义 skills 目录
 
-### DAG引擎CLI
+然后实现一个循环：skills 注入到系统提示词，每一轮要求模型使用 subagent 和 Kerrigan DAG skills 查找可执行节点并分发执行，直到可执行节点数量为 0。
 
-dag引擎应该只包含这几个接口
+### DAG 引擎
 
-一个任务也许需要这几个字段：
+#### 任务数据模型
 
-- 任务id
-- 任务简述summary：足够简短，切足够让人
-- 任务详细描述和相关饮用：整体是一个markdown格式字符串
-- 后序的任务：依赖这个任务的节点id列表
-- 任务状态：根据需要设计枚举
-- metadata：dict，尽可能有限的几个可选字段
-  - 执行失败的话包括失败原因，是否需要增加新的任务、新的资源之类的。一个任务我的设想不管成功失败永远不会继续，只会执行一次然后留下结果，如果“继续”也是生成新的节点与现有的节点简历依赖关系，然后产生新的结果。结果错误的任务或留下一个或多个后续的任务说明了如何解决这个错误或相关的探索，然后这些尝试的结果的后续任务是对这个任务的重试。
-  - 执行成功的话给出模型的这个任务的执行结果详细总结，保证能够让后序模型能够拿到足够的信息而不需要重新探索
+一个任务包含以下字段：
 
-dag引擎的接口：
+- **id**：任务唯一标识
+- **summary**：任务简述，足够简短，足够让人一眼理解任务意图
+- **description**：任务详细描述和相关引用，整体为 markdown 格式字符串
+- **successors**：依赖此任务的后继节点 id 列表
+- **status**：任务状态枚举（Pending / Ready / Running / Succeeded / Failed）
+- **metadata**：有限的可选字段
+  - 失败时：包括失败原因、是否需要增加新任务或新资源等。任务不管成功失败永远不会"继续"，只会执行一次并留下结果。如果需要"继续"，则生成新节点与现有节点建立依赖关系，产生新的结果。失败的任务会留下一个或多个后续任务，说明如何解决错误或进行相关探索，这些尝试的后续任务本质上是对原任务的重试。
+  - 成功时：给出执行结果的详细总结，保证后续 agent 能拿到足够的信息而不需要重新探索。
 
-- `add_task(task, depends_on) -> task_id`：添加新任务，指定依赖的前置任务id列表。自动维护前驱/后继双向关系，若所有前置已完成则状态直接为Ready。
+#### 引擎接口
+
+DAG 引擎只包含以下接口：
+
+- `add_task(task, depends_on) -> task_id`：添加新任务，指定依赖的前置任务 id 列表。自动维护前驱/后继双向关系，若所有前置已完成则状态直接为 Ready。
 - `list_all() -> Vec<TaskSummary>`：返回所有节点的轻量摘要（id、summary、successors、status），同时可用于统计各状态数量，了解全局进度。
-- `list_ready() -> Vec<TaskSummary>`：返回所有status为Ready的任务。
-- `update_tasks(Vec<TaskUpdate>)`：批量更新一个或多个任务的字段值（status、metadata等）。引擎内部根据状态变更自动处理级联——当某任务变为Succeeded时，检查其后继节点的前置是否全部完成，是则将后继变为Ready。
-- `get_task(task_id) -> Task`：查询单个任务完整详情，包括description和metadata。供agent读取前置任务的执行结果摘要。
+- `list_ready() -> Vec<TaskSummary>`：返回所有 status 为 Ready 的任务。
+- `update_tasks(Vec<TaskUpdate>)`：批量更新一个或多个任务的字段值（status、metadata 等）。引擎内部根据状态变更自动处理级联——当某任务变为 Succeeded 时，检查其后继节点的前置是否全部完成，是则将后继变为 Ready。
+- `get_task(task_id) -> Task`：查询单个任务完整详情，包括 description 和 metadata。供 agent 读取前置任务的执行结果摘要。
 
-关键设计原则：
+#### 关键设计原则
 
-- 任务只执行一次，永不原地重试。失败后通过add_task衍生新的修复/重试任务并建立依赖关系。
-- 循环终止条件：`list_ready()`为空，即没有可执行节点。
-- DAG状态持久化为JSON文件，每次状态变更后落盘，天然支持`--resume`恢复。
-- 引擎不负责执行，只维护图和状态。agent adapter层负责调用具体agent，拿到结果后调update_tasks回写。
-- `result_summary`是核心通信机制：后续任务的agent通过get_task读取前置的结果摘要，而非共享文件或消息队列。
+- **一次执行**：任务只执行一次，永不原地重试。失败后通过 `add_task` 衍生新的修复/重试任务并建立依赖关系。
+- **终止条件**：`list_ready()` 为空，即没有可执行节点。
+- **持久化**：DAG 状态持久化为 JSON 文件，每次状态变更后落盘，天然支持 `--resume` 恢复。
+- **职责分离**：引擎不负责执行，只维护图和状态。agent adapter 层负责调用具体 agent，拿到结果后调 `update_tasks` 回写。
+- **结果即通信**：`result_summary` 是核心通信机制——后续任务的 agent 通过 `get_task` 读取前置的结果摘要，而非共享文件或消息队列。
 
-### Agent adapter
+### Agent Adapter
 
-需要封装两个能力，其实就是获取subagent和session管理的能力，都是基于agent cli的封装。
+封装 agent CLI 的两个核心能力：subagent 调用和 session 管理。
 
-- 非交互式的prompt下发，支持subagent，支持指定session id，便于后续resume
-- 在指定的session id上resume
-- 需要能制定skills目录
+- 非交互式 prompt 下发，支持 subagent，支持指定 session id（便于后续 resume）
+- 在指定的 session id 上 resume
+- 支持指定 skills 目录
 
-所以在运行时需要自己根据时间等随机因素生成不会重复的session id，记录下来session id
+运行时根据时间等随机因素生成不会重复的 session id 并记录。可在任务的 metadata 中记录使用过的 session id 列表，用于 debug。
 
-可以在所在任务的metadata中记录从早到晚使用过的session id（list），用于debug。
+### Loop of Agent Loop
 
-### loop of agent loop
-
-结构顾名思义
-
-初始化一个任务。kerrigan 框架会准备好标准的文件系统
+初始化一个任务后，Kerrigan 框架准备好标准的文件系统，然后进入循环。
 
 需要准备三个提示词模板：
 
-- 初始化，一个任务的第一个提示词，第一个turn。
-- continue turn。调用agent cli的resume
-- 特殊的，resume 一个任务。我的计划是不会使用resume，而是开一个新的session。这个提示词会引导仔细阅读所有的可用可读和可索引到的信息，了解问题全貌。然后继续。
+1. **初始化**：一个任务的第一个提示词，第一个 turn。
+2. **Continue turn**：调用 agent CLI 的 resume，继续当前 session。
+3. **Resume 任务**：不使用原 session 的 resume，而是开一个新 session。提示词引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
 
-### 外部更多信息输入
+### 外部信息输入
 
-需要一个留言板文件，并且在每个提示词中引导主agent能够在subagent运行时检测这个文件的变化并决定是否修改迭代dag和中断某些subagent。
+提供一个留言板文件。在每个提示词中引导主 agent 在 subagent 运行时检测此文件的变化，并决定是否修改迭代 DAG 或中断某些 subagent。
 
 ### 跨任务打通
 
-虽然不同任务之间最好能分别管理dag。但是最好能通过一个统一cli统一管理
+不同任务之间分别管理各自的 DAG，但通过统一 CLI 统一管理：
 
-- 注册表：需要哪些信息才能狗满足所有的debug、查询、信息打通的需求？包括每个任务使用过的session id也可以作为metadata存在这里
-- 任务id，和保存上面哪些dag文件的目录
-- shared dir，在home文件夹下，保存上面哪些信息和数据、文件。
-- 多个后台swarm任务要并发维护上述文件，需要一个文件锁的机制吧
-- kerrigan cli：基于上面这些，基于id的任务创建、任务查询、任务推进/维护。统一的cli接口。所有任务在后台执行，自己根据这个cli来查询和维护。
+- **注册表**：满足 debug、查询、信息打通的需求，包括每个任务使用过的 session id 等 metadata
+- **任务 id**：与保存 DAG 文件的目录关联
+- **shared dir**：在 home 文件夹下，保存注册信息、数据和共享文件
+- **并发安全**：多个后台 swarm 任务并发维护上述文件，需要文件锁机制
+- **Kerrigan CLI**：基于 id 的任务创建、查询、推进/维护，统一的 CLI 接口。所有任务在后台执行，用户通过 CLI 查询和维护
 
-不应该再有别的东西了。
+### Skills
 
-### skills
+两个层次的 skills：
 
-这里有两个skills，对应两个层次
-
-- dag引擎被封装为skills给kerrigan loop中调用的agent cli来使用
-- kerrigan cli又封装为 skills 给其他的任何agent来使用用来部署一个后台服务，或者这个cli本身直接连接适配到chatbot
-  - 是否也需要一个sdk（优先级非常低）
+1. **DAG 引擎 skills**：DAG 引擎封装为 skills，供 Kerrigan loop 中调用的 agent CLI 使用
+2. **Kerrigan CLI skills**：Kerrigan CLI 封装为 skills，供外部任何 agent 使用，用于部署后台服务，或直接适配到 chatbot
+   - 是否需要一个 SDK（优先级非常低）

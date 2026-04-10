@@ -198,11 +198,12 @@ loop {
     ready = kerrigan-dag ready(task_id)  // 仅用于检查终止条件
     if ready.is_empty() { break }
 
-    // 调用一个主 agent，注入 DAG skills + 提示词模板
-    // agent 内部自行：
-    //   1. 通过 kerrigan-dag ready/get 读取可执行节点和前置结果
-    //   2. 用 subagent 并行执行各 ready 节点
-    //   3. 通过 kerrigan-dag update/add 回写结果、衍生新节点
+    // 构造本轮提示词：
+    //   - 注入所有 ready 节点的 summary 信息（kerrigan 程序侧预先查询并拼入）
+    //   - 要求 agent 使用 DAG engine skill 获取节点详情和前置结果
+    //   - 要求 agent 用 subagent 并行执行 ready 节点
+    //   - 要求 agent 通过 DAG engine skill 回写结果、衍生新节点
+    prompt = render_template(ready_nodes_summary)
     adapter.run(prompt, session_id, skills_dir)
 }
 ```

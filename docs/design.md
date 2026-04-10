@@ -97,11 +97,11 @@ Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session �
 
 初始化一个任务后，Kerrigan 框架准备好标准的文件系统，然后进入循环。
 
-需要准备三个提示词模板：
+每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 DAG engine skill 来获取节点详情、执行任务、回写结果。需要准备三个提示词模板：
 
-1. **初始化**：一个任务的第一个提示词，第一个 turn。
-2. **Continue turn**：调用 agent CLI 的 resume，继续当前 session。
-3. **Resume 任务**：不使用原 session 的 resume，而是开一个新 session。提示词引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
+1. **初始化**：一个任务的第一个提示词，第一个 turn。注入所有 ready 节点的 summary，要求 agent 通过 DAG engine skill 获取详情和前置结果，用 subagent 并行执行，完成后通过 skill 回写结果和衍生新节点。
+2. **Continue turn**：调用 agent CLI 的 resume，注入最新 ready 节点 summary，继续当前 session。
+3. **Resume 任务**：不使用原 session 的 resume，而是开一个新 session。注入最新 ready 节点 summary，引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
 
 ### 外部信息输入
 

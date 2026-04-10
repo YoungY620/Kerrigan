@@ -1,93 +1,108 @@
-# Kerrigan Storage - DAG Management Skill
+---
+name: kerrigan-storage
+description: >
+  Manage DAG-based task graphs via the kerrigan-storage CLI. Use when you need
+  to view ready nodes, read predecessor results, record execution outcomes,
+  or spawn follow-up nodes in a Kerrigan task DAG.
+compatibility: Requires kerrigan-storage binary in PATH
+---
 
-Use this skill to manage tasks and their DAG (Directed Acyclic Graph) of work nodes. All commands output JSON.
+# Kerrigan Storage
 
-## When to use
+Manage tasks and their DAG (Directed Acyclic Graph) of work nodes. All commands output JSON.
 
-- When you need to view, create, or update nodes in a task's DAG
-- When you need to check which nodes are ready for execution
-- When you need to read a node's details or predecessor results before executing work
-- When you need to record execution results or spawn follow-up nodes after completing work
+## Quick Start
 
-## Available operations
-
-### Task management
-
-**List all tasks:**
 ```bash
-kerrigan-storage task list
-```
-Returns: JSON array of `{id, summary, workdir, created_at}`.
-
-**Create a new task:**
-```bash
-kerrigan-storage task create --summary "description of the task" --workdir /path/to/workdir
-```
-Returns: `{"task_id": "..."}`.
-
-### DAG node operations
-
-All node operations require `--task <task-id>` to specify which task's DAG to operate on.
-
-**List all nodes (overview):**
-```bash
-kerrigan-storage list --task <task-id>
-```
-Returns: JSON array of `{id, summary, successors, status}`. Use this to understand the full DAG topology and progress.
-
-**List ready nodes:**
-```bash
+# See what's ready to execute
 kerrigan-storage ready --task <task-id>
-```
-Returns: JSON array of nodes with status `ready` - these are the nodes you should execute next.
 
-**Get node details:**
-```bash
+# Read a node's details and predecessor results
 kerrigan-storage get --task <task-id> --node <node-id>
-```
-Returns: Full node JSON including `description`, `metadata.result_summary` (from predecessors), and `metadata.failure_reason`. Use this to read predecessor results before starting work on a dependent node.
 
-**Add a new node:**
+# Mark a node as succeeded with results
+kerrigan-storage update --task <task-id> --input '[{"id":"<node-id>","status":"succeeded","metadata":{"result_summary":"Found 3 files that need updating."}}]'
+```
+
+## Examples
+
+### Check ready nodes and execute them
+
 ```bash
-kerrigan-storage add --task <task-id> --summary "what this node does" --description "detailed markdown description" --depends-on node-id-1,node-id-2
-```
-Returns: `{"node_id": "..."}`. The node starts as `ready` if it has no dependencies or all dependencies are already `succeeded`; otherwise it starts as `pending`.
+# 1. List ready nodes
+kerrigan-storage ready --task abc-123
+# Output: [{"id":"n1","summary":"Analyze API endpoints","successors":["n3"],"status":"ready"}, ...]
 
-**Update nodes (batch):**
+# 2. Get full details before executing
+kerrigan-storage get --task abc-123 --node n1
+# Output: {"id":"n1","summary":"...","description":"...","predecessors":[],"successors":["n3"],"status":"ready","metadata":{}}
+
+# 3. (Execute the work via subagent)
+
+# 4. Record the result
+kerrigan-storage update --task abc-123 --input '[{"id":"n1","status":"succeeded","metadata":{"result_summary":"Found 3 REST endpoints: /users, /orders, /products. All use JSON. Auth via Bearer token."}}]'
+```
+
+### Handle failure and spawn retry
+
 ```bash
-kerrigan-storage update --task <task-id> --input '<json>'
+# Mark the node as failed
+kerrigan-storage update --task abc-123 --input '[{"id":"n2","status":"failed","metadata":{"failure_reason":"Database connection refused on port 5432"}}]'
+
+# Add a fix node, then a retry node that depends on the fix
+kerrigan-storage add --task abc-123 --summary "Fix: ensure database is running" --description "Check docker-compose status and restart postgres if needed"
+# Output: {"node_id":"n4"}
+
+kerrigan-storage add --task abc-123 --summary "Retry: migrate database schema" --description "Re-attempt the migration after database is confirmed running" --depends-on n4
+# Output: {"node_id":"n5"}
 ```
-Input is a JSON array of updates. Each update has `id` (required), and optional `status` and `metadata` fields.
 
-Status values: `pending`, `ready`, `running`, `succeeded`, `failed`.
+### Create a task and build its DAG
 
-Example - mark a node as succeeded with results:
 ```bash
-kerrigan-storage update --task <task-id> --input '[{"id":"<node-id>","status":"succeeded","metadata":{"result_summary":"Completed successfully. Found 3 API endpoints that need updating."}}]'
+# Create a task
+kerrigan-storage task create --summary "Refactor auth module" --workdir /home/user/project
+# Output: {"task_id":"abc-123"}
+
+# Add root nodes (no dependencies = immediately ready)
+kerrigan-storage add --task abc-123 --summary "Analyze current auth flow" --description "Read all files in src/auth/ and document the current authentication flow"
+# Output: {"node_id":"n1"}
+
+kerrigan-storage add --task abc-123 --summary "Review security requirements" --description "Check docs/security.md for compliance requirements"
+# Output: {"node_id":"n2"}
+
+# Add a dependent node
+kerrigan-storage add --task abc-123 --summary "Design new auth architecture" --description "Based on analysis and requirements, design the new auth module" --depends-on n1,n2
+# Output: {"node_id":"n3"}
 ```
 
-Example - mark a node as failed:
+### View DAG overview
+
 ```bash
-kerrigan-storage update --task <task-id> --input '[{"id":"<node-id>","status":"failed","metadata":{"failure_reason":"Could not access the database. Connection refused."}}]'
+kerrigan-storage list --task abc-123
+# Output: [
+#   {"id":"n1","summary":"Analyze current auth flow","successors":["n3"],"status":"succeeded"},
+#   {"id":"n2","summary":"Review security requirements","successors":["n3"],"status":"ready"},
+#   {"id":"n3","summary":"Design new auth architecture","successors":[],"status":"pending"}
+# ]
 ```
 
-## Typical workflow
+## Command Reference
 
-1. **Check ready nodes:** `kerrigan-storage ready --task <task-id>`
-2. **For each ready node:**
-   a. **Read details:** `kerrigan-storage get --task <task-id> --node <node-id>` to get the full description and predecessor results
-   b. **Execute the work** using subagent
-   c. **Record results:** `kerrigan-storage update --task <task-id> --input '[{"id":"<node-id>","status":"succeeded","metadata":{"result_summary":"..."}}]'`
-3. **On failure:** Update with `failed` status and `failure_reason`, then add new retry/fix nodes:
-   ```bash
-   kerrigan-storage update --task <task-id> --input '[{"id":"<node-id>","status":"failed","metadata":{"failure_reason":"..."}}]'
-   kerrigan-storage add --task <task-id> --summary "retry: fix the issue" --description "..." --depends-on <other-node-id>
-   ```
-4. **Repeat** until `kerrigan-storage ready --task <task-id>` returns an empty list.
+| Command | Description |
+|---------|-------------|
+| `task list` | List all registered tasks |
+| `task create --summary "..." --workdir .` | Create a new task |
+| `list --task <id>` | List all nodes (id, summary, successors, status) |
+| `ready --task <id>` | List nodes ready for execution |
+| `get --task <id> --node <id>` | Get full node details |
+| `add --task <id> --summary "..." [--description "..."] [--depends-on a,b]` | Add a new node |
+| `update --task <id> --input '<json>'` | Batch update nodes (status, metadata) |
 
-## Important rules
+## ⚠️ Important Rules
 
-- Nodes execute **exactly once**. Never retry a node in place. Instead, create a new node with `add` and set up dependencies.
-- Always write a `result_summary` when marking a node as `succeeded` - downstream nodes depend on this information.
-- Always write a `failure_reason` when marking a node as `failed`.
-- Use `get` to read predecessor results before executing a node - this is how information flows between nodes without direct communication.
+- Nodes execute **exactly once**. Never retry in place — create new nodes with `add`.
+- Always write `result_summary` on success — downstream nodes depend on this.
+- Always write `failure_reason` on failure.
+- Use `get` to read predecessor `result_summary` before executing — this is how nodes communicate.
+- Status flow: `pending` → `ready` → `running` → `succeeded` / `failed`.

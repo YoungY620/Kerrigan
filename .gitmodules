@@ -1,3 +1,6 @@
 [submodule "kerrigan-cli"]
 	path = kerrigan-cli
 	url = ssh://git@github.com/YoungY620:30022/harness/kerrigan-cli.git
+[submodule "kerrigan-dag-cli"]
+	path = kerrigan-dag-cli
+	url = ssh://git@github.com/YoungY620:30022/harness/kerrigan-dag-cli.git

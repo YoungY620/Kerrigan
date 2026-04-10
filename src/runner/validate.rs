@@ -1,4 +1,5 @@
 use kerrigan_storage::{NodeStatus, StorageEngine};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A single DAG consistency issue.
 #[derive(Debug, Clone)]
@@ -16,6 +17,10 @@ impl std::fmt::Display for DagIssue {
 /// Validate DAG consistency after an agent round.
 ///
 /// Checks:
+/// - Duplicate node IDs
+/// - Predecessor references to non-existent nodes
+/// - Successor references to non-existent nodes
+/// - Predecessor/successor bidirectional consistency
 /// - Nodes with no predecessors should be Ready (not Pending)
 /// - Ready nodes should have no incomplete predecessors
 /// - Succeeded nodes should have result_summary
@@ -24,16 +29,65 @@ impl std::fmt::Display for DagIssue {
 pub fn validate_dag(engine: &StorageEngine, task_id: &str) -> Vec<DagIssue> {
     let mut issues = Vec::new();
 
-    let nodes = match engine.list_all(task_id) {
+    let summaries = match engine.list_all(task_id) {
         Ok(n) => n,
         Err(_) => return issues,
     };
 
-    for summary in &nodes {
+    // Collect all node IDs for reference checks
+    let all_ids: HashSet<String> = summaries.iter().map(|s| s.id.clone()).collect();
+
+    // Check for duplicate IDs (list_all uses HashMap so unlikely, but defensive)
+    if all_ids.len() != summaries.len() {
+        issues.push(DagIssue {
+            node_id: "*".into(),
+            description: format!(
+                "Duplicate node IDs detected: {} unique IDs for {} nodes",
+                all_ids.len(),
+                summaries.len()
+            ),
+        });
+    }
+
+    for summary in &summaries {
         let node = match engine.get_node(task_id, &summary.id) {
             Ok(n) => n,
             Err(_) => continue,
         };
+
+        // Predecessor references must exist
+        for pred_id in &node.predecessors {
+            if !all_ids.contains(pred_id) {
+                issues.push(DagIssue {
+                    node_id: node.id.clone(),
+                    description: format!("Predecessor {pred_id} does not exist in the DAG"),
+                });
+            }
+        }
+
+        // Successor references must exist
+        for succ_id in &node.successors {
+            if !all_ids.contains(succ_id) {
+                issues.push(DagIssue {
+                    node_id: node.id.clone(),
+                    description: format!("Successor {succ_id} does not exist in the DAG"),
+                });
+            }
+        }
+
+        // Bidirectional consistency: if A lists B as successor, B must list A as predecessor
+        for succ_id in &node.successors {
+            if let Ok(succ) = engine.get_node(task_id, succ_id)
+                && !succ.predecessors.contains(&node.id)
+            {
+                issues.push(DagIssue {
+                    node_id: node.id.clone(),
+                    description: format!(
+                        "Node lists {succ_id} as successor, but {succ_id} does not list this node as predecessor"
+                    ),
+                });
+            }
+        }
 
         // Nodes with no predecessors should not be Pending
         if node.predecessors.is_empty() && node.status == NodeStatus::Pending {
@@ -83,6 +137,61 @@ pub fn validate_dag(engine: &StorageEngine, task_id: &str) -> Vec<DagIssue> {
                 description: "Node has empty summary".into(),
             });
         }
+    }
+
+    // Cycle detection via topological sort (Kahn's algorithm)
+    // Build adjacency from successors
+    let mut in_degree: HashMap<String, usize> = HashMap::new();
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+    for s in &summaries {
+        in_degree.entry(s.id.clone()).or_insert(0);
+        adj.entry(s.id.clone()).or_default();
+    }
+    for s in &summaries {
+        if let Ok(node) = engine.get_node(task_id, &s.id) {
+            for succ_id in &node.successors {
+                if all_ids.contains(succ_id) {
+                    *in_degree.entry(succ_id.clone()).or_insert(0) += 1;
+                    adj.entry(node.id.clone())
+                        .or_default()
+                        .push(succ_id.clone());
+                }
+            }
+        }
+    }
+    let mut queue: VecDeque<String> = in_degree
+        .iter()
+        .filter(|(_, deg)| **deg == 0)
+        .map(|(id, _)| id.clone())
+        .collect();
+    let mut visited_count = 0;
+    while let Some(id) = queue.pop_front() {
+        visited_count += 1;
+        if let Some(neighbors) = adj.get(&id) {
+            for n in neighbors {
+                if let Some(deg) = in_degree.get_mut(n) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(n.clone());
+                    }
+                }
+            }
+        }
+    }
+    if visited_count < summaries.len() {
+        let cycle_nodes: Vec<String> = in_degree
+            .iter()
+            .filter(|(_, deg)| **deg > 0)
+            .map(|(id, _)| id.clone())
+            .collect();
+        issues.push(DagIssue {
+            node_id: "*".into(),
+            description: format!(
+                "Cycle detected involving {} nodes: {}",
+                cycle_nodes.len(),
+                cycle_nodes.join(", ")
+            ),
+        });
     }
 
     issues
@@ -189,5 +298,135 @@ mod tests {
         let issues = validate_dag(&engine, &task_id);
         assert_eq!(issues.len(), 1);
         assert!(issues[0].description.contains("failure_reason"));
+    }
+
+    #[test]
+    fn dangling_predecessor_reference() {
+        // Manually corrupt the DAG by editing the JSON to have a non-existent predecessor
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+
+        // Manually patch dag.json to add a fake predecessor
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["predecessors"] = serde_json::json!(["ghost-node"]);
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues.iter().any(|i| i.description.contains("ghost-node")
+                && i.description.contains("does not exist")),
+            "Expected dangling predecessor issue, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn empty_summary_detected() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+
+        // Manually patch to empty summary
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["summary"] = serde_json::json!("  ");
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.description.contains("empty summary")),
+            "Expected empty summary issue, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn cycle_detected() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+        let b = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "B".into(),
+                    description: "".into(),
+                },
+                vec![a.clone()],
+            )
+            .unwrap();
+
+        // Manually create a cycle: A→B and B→A
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        // Add A as predecessor of B (already done), and B as predecessor of A
+        dag["nodes"][&a]["predecessors"] = serde_json::json!([&b]);
+        dag["nodes"][&b]["successors"] = serde_json::json!([&a]);
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues.iter().any(|i| i.description.contains("Cycle")),
+            "Expected cycle issue, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn no_predecessors_but_pending() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+
+        // Manually patch status to pending (should be ready since no predecessors)
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["status"] = serde_json::json!("pending");
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.description.contains("no predecessors but is Pending")),
+            "Expected pending-without-predecessors issue, got: {issues:?}"
+        );
     }
 }

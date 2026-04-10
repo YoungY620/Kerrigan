@@ -429,4 +429,169 @@ mod tests {
             "Expected pending-without-predecessors issue, got: {issues:?}"
         );
     }
+
+    #[test]
+    fn dangling_successor_reference() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["successors"] = serde_json::json!(["phantom-node"]);
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues.iter().any(|i| i.description.contains("phantom-node")
+                && i.description.contains("does not exist")),
+            "Expected dangling successor issue, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn bidirectional_inconsistency() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+        let b = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "B".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+
+        // A claims B is successor, but B does not list A as predecessor
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["successors"] = serde_json::json!([&b]);
+        // B's predecessors stays empty — inconsistency
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues.iter().any(|i| i
+                .description
+                .contains("does not list this node as predecessor")),
+            "Expected bidirectional inconsistency, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn ready_but_predecessor_not_succeeded() {
+        let (tmp, engine, task_id) = setup();
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+        let b = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "B".into(),
+                    description: "".into(),
+                },
+                vec![a.clone()],
+            )
+            .unwrap();
+
+        // Manually set B to Ready while A is still Ready (not Succeeded)
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&b]["status"] = serde_json::json!("ready");
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.description.contains("Ready but predecessor")),
+            "Expected ready-with-incomplete-predecessor issue, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn multiple_issues_detected() {
+        let (tmp, engine, task_id) = setup();
+        // Node with empty summary + succeeded without result
+        let a = engine
+            .add_node(
+                &task_id,
+                NewNode {
+                    summary: "A".into(),
+                    description: "".into(),
+                },
+                vec![],
+            )
+            .unwrap();
+        engine
+            .update_nodes(
+                &task_id,
+                vec![NodeUpdate {
+                    id: a.clone(),
+                    status: Some(NodeStatus::Succeeded),
+                    metadata: None, // missing result_summary
+                }],
+            )
+            .unwrap();
+
+        // Patch summary to empty
+        let dag_path = tmp.path().join("tasks").join(&task_id).join("dag.json");
+        let mut dag: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&dag_path).unwrap()).unwrap();
+        dag["nodes"][&a]["summary"] = serde_json::json!("");
+        std::fs::write(&dag_path, serde_json::to_string_pretty(&dag).unwrap()).unwrap();
+
+        let issues = validate_dag(&engine, &task_id);
+        assert!(
+            issues.len() >= 2,
+            "Expected multiple issues, got: {issues:?}"
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.description.contains("result_summary"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.description.contains("empty summary"))
+        );
+    }
+
+    #[test]
+    fn empty_dag_no_issues() {
+        let (_tmp, engine, task_id) = setup();
+        let issues = validate_dag(&engine, &task_id);
+        assert!(issues.is_empty());
+    }
 }

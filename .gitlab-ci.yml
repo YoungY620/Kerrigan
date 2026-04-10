@@ -1,0 +1,18 @@
+stages:
+  - check
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .cargo/registry
+    - .cargo/git
+    - target/
+
+check:
+  stage: check
+  image: rust:latest
+  script:
+    - make check

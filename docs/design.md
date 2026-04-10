@@ -39,23 +39,48 @@
   - 失败时：包括失败原因、是否需要增加新任务或新资源等。任务不管成功失败永远不会"继续"，只会执行一次并留下结果。如果需要"继续"，则生成新节点与现有节点建立依赖关系，产生新的结果。失败的任务会留下一个或多个后续任务，说明如何解决错误或进行相关探索，这些尝试的后续任务本质上是对原任务的重试。
   - 成功时：给出执行结果的详细总结，保证后续 agent 能拿到足够的信息而不需要重新探索。
 
+#### 存储管理
+
+DAG 引擎统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 task id 调用，调用方不需要知道文件路径细节：
+
+```text
+~/.kerrigan/
+├── registry.json          # 注册表：所有任务的索引
+├── lock                   # 全局文件锁，保证并发安全
+└── tasks/
+    └── <task-id>/
+        ├── dag.json       # 该任务的 DAG 状态
+        ├── config.json    # 任务配置（工作目录、agent adapter 类型等）
+        ├── sessions.json  # 使用过的 session id 列表，用于 debug
+        ├── board.md       # 留言板，供人工向运行中的任务注入信息
+        └── shared/        # 该任务的共享文件（跨节点可访问的资源）
+```
+
+- **registry.json**：全局注册表，记录每个任务的 id、摘要、状态、创建时间、工作目录路径等
+- **tasks/\<task-id\>/**：每个任务独立一个目录，DAG 文件、session 记录、留言板等都在这里
+- **并发安全**：多个后台 swarm 任务并发维护上述文件，通过文件锁机制保证一致性
+
 #### 引擎接口
 
-DAG 引擎只包含以下接口：
+所有接口基于 task id，引擎内部自动定位到 `~/.kerrigan/tasks/<task-id>/dag.json`：
 
-- `add_task(task, depends_on) -> task_id`：添加新任务，指定依赖的前置任务 id 列表。自动维护前驱/后继双向关系，若所有前置已完成则状态直接为 Ready。
-- `list_all() -> Vec<TaskSummary>`：返回所有节点的轻量摘要（id、summary、successors、status），同时可用于统计各状态数量，了解全局进度。
-- `list_ready() -> Vec<TaskSummary>`：返回所有 status 为 Ready 的任务。
-- `update_tasks(Vec<TaskUpdate>)`：批量更新一个或多个任务的字段值（status、metadata 等）。引擎内部根据状态变更自动处理级联——当某任务变为 Succeeded 时，检查其后继节点的前置是否全部完成，是则将后继变为 Ready。
-- `get_task(task_id) -> Task`：查询单个任务完整详情，包括 description 和 metadata。供 agent 读取前置任务的执行结果摘要。
+- `init()`：初始化 `~/.kerrigan/` 目录结构
+- `task_create(summary, workdir) -> task_id`：创建任务，生成目录，注册到 registry
+- `task_list() -> Vec<TaskEntry>`：列出所有注册的任务
+- `add_task(task_id, node, depends_on) -> node_id`：向指定任务的 DAG 添加新节点，指定依赖的前置节点 id 列表。自动维护前驱/后继双向关系，若所有前置已完成则状态直接为 Ready。
+- `list_all(task_id) -> Vec<NodeSummary>`：返回指定任务所有节点的轻量摘要（id、summary、successors、status），同时可用于统计各状态数量，了解全局进度。
+- `list_ready(task_id) -> Vec<NodeSummary>`：返回指定任务所有 status 为 Ready 的节点。
+- `update_nodes(task_id, Vec<NodeUpdate>)`：批量更新指定任务中一个或多个节点的字段值（status、metadata 等）。引擎内部根据状态变更自动处理级联——当某节点变为 Succeeded 时，检查其后继节点的前置是否全部完成，是则将后继变为 Ready。
+- `get_node(task_id, node_id) -> Node`：查询指定任务中单个节点的完整详情，包括 description 和 metadata。供 agent 读取前置节点的执行结果摘要。
 
 #### 关键设计原则
 
-- **一次执行**：任务只执行一次，永不原地重试。失败后通过 `add_task` 衍生新的修复/重试任务并建立依赖关系。
+- **基于 id 操作**：所有接口通过 task id 和 node id 调用，不暴露文件路径细节，降低调用方复杂度。
+- **一次执行**：节点只执行一次，永不原地重试。失败后通过 `add_task` 衍生新的修复/重试节点并建立依赖关系。
 - **终止条件**：`list_ready()` 为空，即没有可执行节点。
 - **持久化**：DAG 状态持久化为 JSON 文件，每次状态变更后落盘，天然支持 `--resume` 恢复。
-- **职责分离**：引擎不负责执行，只维护图和状态。agent adapter 层负责调用具体 agent，拿到结果后调 `update_tasks` 回写。
-- **结果即通信**：`result_summary` 是核心通信机制——后续任务的 agent 通过 `get_task` 读取前置的结果摘要，而非共享文件或消息队列。
+- **职责分离**：引擎不负责执行，只维护图和状态。agent adapter 层负责调用具体 agent，拿到结果后调 `update_nodes` 回写。
+- **结果即通信**：`result_summary` 是核心通信机制——后续节点的 agent 通过 `get_node` 读取前置的结果摘要，而非共享文件或消息队列。
 
 ### Agent Adapter
 
@@ -83,25 +108,7 @@ DAG 引擎只包含以下接口：
 
 ### 跨任务打通
 
-不同任务之间分别管理各自的 DAG，但通过统一 CLI 统一管理。所有全局状态存储在 `~/.kerrigan/` 下：
-
-```
-~/.kerrigan/
-├── registry.json          # 注册表：所有任务的索引
-├── lock                   # 全局文件锁，保证并发安全
-└── tasks/
-    └── <task-id>/
-        ├── dag.json       # 该任务的 DAG 状态
-        ├── config.json    # 任务配置（工作目录、agent adapter 类型等）
-        ├── sessions.json  # 使用过的 session id 列表，用于 debug
-        ├── board.md       # 留言板，供人工向运行中的任务注入信息
-        └── shared/        # 该任务的共享文件（跨节点可访问的资源）
-```
-
-- **registry.json**：全局注册表，记录每个任务的 id、摘要、状态、创建时间、工作目录路径等，满足 debug、查询、信息打通的需求
-- **tasks/\<task-id\>/**：每个任务独立一个目录，DAG 文件、session 记录、留言板等都在这里
-- **并发安全**：多个后台 swarm 任务并发维护上述文件，通过文件锁机制保证一致性
-- **Kerrigan CLI**：基于 id 的任务创建、查询、推进/维护，统一的 CLI 接口。所有任务在后台执行，用户通过 CLI 查询和维护
+不同任务之间分别管理各自的 DAG，通过 DAG 引擎的统一接口（`task_list`、`task_create` 等）统一管理。存储结构和注册表由 DAG 引擎层维护（见上文"存储管理"），Kerrigan CLI 基于这些接口实现上层编排，所有任务在后台执行，用户通过 CLI 查询和维护。
 
 ### Skills
 

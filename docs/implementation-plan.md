@@ -5,54 +5,66 @@
 将 thinking-space/kerrigan 中与 kitty 耦合的多智能体 swarm 机制，用 Rust 重新实现。按设计文档重新设计，不是直接移植。
 
 **Repo 结构**：
-- `kerrigan-dag-engine`（独立 repo/submodule）：DAG 引擎核心库 + CLI，纯粹的任务图状态机
-- `kerrigan-cli`（独立 repo/submodule）：编排层，依赖 kerrigan-dag-engine，包含 agent adapter、主循环、skills、~/.kerrigan/ 管理
+
+- `kerrigan-dag-engine`（独立 repo/submodule）：DAG 引擎核心库 + CLI，包含 `~/.kerrigan/` 存储管理、任务注册表、DAG 图维护，所有接口基于 id
+- `kerrigan-cli`（独立 repo/submodule）：编排层，依赖 kerrigan-dag-engine，包含 agent adapter、主循环、skills
 
 核心原则：每一步高内聚、充分测试、对外接口承诺绝对有效。
 
 ## 步骤
 
-### Step 1: DAG 引擎核心库（kerrigan-dag-engine）
+### Step 1: DAG 引擎核心库 + 存储管理（kerrigan-dag-engine）
 
-**目标**：实现纯库层的 DAG 引擎，5 个接口全部可用，带完整单元测试。
+**目标**：实现 DAG 引擎的纯库层，包含 `~/.kerrigan/` 目录管理、任务注册表、DAG 图操作，所有接口基于 id，带完整单元测试。
 
 **文件**：
-```
+
+```text
 kerrigan-dag-engine/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
-│   ├── engine.rs      # DagEngine struct + 5 个接口实现
-│   ├── model.rs       # Task, TaskSummary, TaskUpdate, TaskStatus, TaskMetadata
-│   ├── persist.rs     # JSON 序列化/反序列化 + 原子写入
+│   ├── engine.rs      # DagEngine struct：init, task_create, task_list + DAG 操作
+│   ├── model.rs       # Task, Node, NodeSummary, NodeUpdate, TaskStatus, NodeMetadata, TaskEntry
+│   ├── persist.rs     # JSON 序列化/反序列化 + 原子写入 + 文件锁
 │   └── error.rs       # DagError 枚举
 ├── tests/
-│   └── engine_test.rs # 集成测试
+│   └── engine_test.rs
 ```
 
 **实现内容**：
+
+存储管理：
+- `init()`：初始化 `~/.kerrigan/` 目录（幂等）
+- `task_create(summary, workdir) -> task_id`：生成 task-id、创建目录结构、注册到 registry.json
+- `task_list() -> Vec<TaskEntry>`：列出所有注册的任务
+- 文件锁：`fs2` crate，保证并发安全
+- 原子写入：write tmp + rename
+
+DAG 操作（所有接口通过 task_id 定位 dag.json）：
 - `TaskStatus` 枚举：Pending / Ready / Running / Succeeded / Failed
-- `Task` 结构体：id, summary, description, predecessors, successors, status, metadata
-- `TaskMetadata`：result_summary, failure_reason, spawned_tasks, session_ids
-- `DagEngine` 5 个接口：
-  - `add_task(NewTask, depends_on: Vec<TaskId>) -> Result<TaskId>`
-  - `list_all() -> Vec<TaskSummary>`
-  - `list_ready() -> Vec<TaskSummary>`
-  - `update_tasks(Vec<TaskUpdate>) -> Result<()>`（含级联 Ready 逻辑）
-  - `get_task(TaskId) -> Option<Task>`
-- JSON 持久化：每次变更后原子写入（write tmp + rename）
-- 文件锁：`fs2` crate 的 flock，保证并发安全
+- `Node` 结构体：id, summary, description, predecessors, successors, status, metadata
+- `NodeMetadata`：result_summary, failure_reason, spawned_tasks, session_ids
+- `add_node(task_id, NewNode, depends_on) -> Result<NodeId>`
+- `list_all(task_id) -> Vec<NodeSummary>`
+- `list_ready(task_id) -> Vec<NodeSummary>`
+- `update_nodes(task_id, Vec<NodeUpdate>) -> Result<()>`（含级联 Ready 逻辑）
+- `get_node(task_id, node_id) -> Option<Node>`
 
 **依赖**：serde, serde_json, uuid, thiserror, fs2
 
 **测试要点**：
-- 基础 CRUD：add → get → list_all 一致性
+- init 幂等：多次调用不破坏已有数据
+- task_create → task_list 一致性
+- 并发 task_create：两个进程同时创建不冲突
+- 目录结构完整性：create 后 dag.json / config.json / sessions.json / board.md / shared/ 都存在
+- 基础 CRUD：add_node → get_node → list_all 一致性
 - 依赖解析：add A, add B(depends_on A) → B 是 Pending；complete A → B 变 Ready
 - 多前驱：C depends_on [A, B]，A 完成后 C 仍 Pending，B 也完成后 C 变 Ready
 - 级联深度：A→B→C→D 链式级联
 - 失败不传播：A Failed → B 永远 Pending
-- update_tasks 批量：一次更新多个任务
-- 环检测：add_task 不能引入环
+- update_nodes 批量：一次更新多个节点
+- 环检测：add_node 不能引入环
 - 持久化往返：engine → save → load → engine，状态完全一致
 - 并发文件锁：两个进程同时操作同一个 dag.json
 
@@ -62,107 +74,68 @@ kerrigan-dag-engine/
 
 ### Step 2: DAG CLI（kerrigan-dag-engine）
 
-**目标**：在同一 repo 中为 DAG 引擎提供 CLI 入口，JSON 输入输出，可被 agent skills 直接调用。
+**目标**：在同一 repo 中为 DAG 引擎提供 CLI 入口，所有接口基于 id，JSON 输出，可被 agent skills 直接调用。
 
 **文件**：
-```
+
+```text
 kerrigan-dag-engine/src/
 ├── main.rs
-├── cli.rs        # kerrigan-dag add/list/ready/update/get 子命令
+├── cli.rs
 ```
 
 **CLI 接口**：
+
 ```bash
-kerrigan-dag add --file <dag.json> --summary "..." --description "..." --depends-on id1,id2
-kerrigan-dag list --file <dag.json>                    # list_all, JSON output
-kerrigan-dag ready --file <dag.json>                   # list_ready, JSON output
-kerrigan-dag update --file <dag.json> --input <json>   # update_tasks, JSON input
-kerrigan-dag get --file <dag.json> --id <task_id>      # get_task, JSON output
+kerrigan-dag init                                                    # 初始化 ~/.kerrigan/
+kerrigan-dag task create --summary "..." --workdir .                 # 创建任务
+kerrigan-dag task list                                               # 列出所有任务
+
+kerrigan-dag add --task <task-id> --summary "..." --description "..." --depends-on n1,n2
+kerrigan-dag list --task <task-id>                                   # list_all, JSON output
+kerrigan-dag ready --task <task-id>                                  # list_ready, JSON output
+kerrigan-dag update --task <task-id> --input <json>                  # update_nodes, JSON input
+kerrigan-dag get --task <task-id> --node <node-id>                   # get_node, JSON output
 ```
 
 - 所有输出为 JSON（方便 agent 解析）
-- `--file` 指定 dag.json 路径
+- 所有操作通过 task-id 定位，不暴露文件路径
 - `update` 从 stdin 或 `--input` 读取 JSON
 
 **依赖**：clap (derive), assert_cmd, predicates (dev)
 
 **测试要点**：
 - CLI 端到端：通过 `assert_cmd` 测试每个子命令的 stdin/stdout/exit code
-- 错误场景：不存在的 dag-file、不存在的 task id、非法 JSON 输入
+- 错误场景：不存在的 task-id、不存在的 node-id、非法 JSON 输入
 - 与 Step 1 的库层一致性：CLI 输出 == 直接调用引擎的结果
 
 **验证方式**：`cargo test` + 手动 CLI 调用验证
 
 ---
 
-### Step 3: `~/.kerrigan/` 目录管理 + 任务注册表（kerrigan-cli）
+### Step 3: Agent Adapter（kerrigan-cli）
 
-**目标**：在 kerrigan-cli 中实现跨任务的全局管理层。
+**目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，支持 Claude Code 作为首个 adapter。
 
 **文件**：
-```
+
+```text
 kerrigan-cli/
-├── Cargo.toml              # 依赖 kerrigan-dag-engine（git submodule 或 path）
+├── Cargo.toml              # 依赖 kerrigan-dag-engine
 ├── src/
 │   ├── lib.rs
 │   ├── main.rs
-│   ├── registry/
+│   ├── adapter/
 │   │   ├── mod.rs
-│   │   ├── store.rs       # Registry CRUD (registry.json)
-│   │   └── model.rs       # RegistryEntry
+│   │   ├── traits.rs      # AgentAdapter trait
+│   │   ├── claude.rs      # Claude Code adapter
+│   │   └── session.rs     # session id 生成与管理
 │   └── cli/
-│       ├── mod.rs
-│       ├── task.rs        # kerrigan task create/list/status/inspect
-│       └── init.rs        # kerrigan init
-```
-
-**目录结构**：
-```
-~/.kerrigan/
-├── registry.json
-├── lock
-└── tasks/<task-id>/
-    ├── dag.json
-    ├── config.json
-    ├── sessions.json
-    ├── board.md
-    └── shared/
-```
-
-**CLI 接口**：
-```bash
-kerrigan init                                      # 初始化 ~/.kerrigan/
-kerrigan task create --summary "..." --workdir .   # 创建任务，生成目录
-kerrigan task list                                 # 列出所有注册的任务
-kerrigan task status <task-id>                     # 查看某任务的 DAG 状态摘要
-kerrigan task inspect <task-id>                    # 查看详细信息
-```
-
-**测试要点**：
-- init 幂等：多次调用不破坏已有数据
-- create → list 一致性
-- 并发 create：两个进程同时创建不冲突
-- 目录结构完整性：create 后所有文件都存在
-
-**验证方式**：`cargo test` + 手动验证
-
----
-
-### Step 4: Agent Adapter（kerrigan-cli）
-
-**目标**：实现 agent CLI 的封装层，支持 Claude Code 作为首个 adapter。
-
-**文件**：
-```
-kerrigan-cli/src/
-├── adapter/
-│   ├── mod.rs
-│   ├── traits.rs      # AgentAdapter trait
-│   ├── claude.rs      # Claude Code adapter
-│   └── session.rs     # session id 生成与管理
+│       └── mod.rs
 ```
 
 **AgentAdapter trait**：
+
 ```rust
 pub trait AgentAdapter {
     async fn run(&self, prompt: &str, session_id: &str, skills_dir: Option<&Path>) -> Result<AgentOutput>;
@@ -175,7 +148,7 @@ pub trait AgentAdapter {
 - 支持 `--allowedTools` 和 skills 注入
 - 解析 stdout 为 AgentOutput
 
-**Session 管理**：`krg_{timestamp}_{random}`，记录到 `sessions.json`
+**Session 管理**：`krg_{timestamp}_{random}`，记录到 `~/.kerrigan/tasks/<task-id>/sessions.json`
 
 **测试要点**：
 - trait 可 mock：用 MockAdapter 测试上层逻辑
@@ -187,12 +160,13 @@ pub trait AgentAdapter {
 
 ---
 
-### Step 5: 提示词模板 + 主循环（kerrigan-cli）
+### Step 4: 提示词模板 + 主循环（kerrigan-cli）
 
 **目标**：实现 Kerrigan 的核心编排循环。
 
 **文件**：
-```
+
+```text
 kerrigan-cli/src/
 ├── runner/
 │   ├── mod.rs
@@ -209,19 +183,21 @@ kerrigan-cli/src/
 3. **resume.md**：新 session 恢复，引导读取所有信息后继续
 
 **主循环**：
-```
+
+```text
 loop {
-    ready = dag.list_ready()
+    ready = kerrigan-dag list_ready(task_id)
     if ready.is_empty() { break }
-    for task in ready {
-        // 构造 prompt（注入前置任务的 result_summary）
+    for node in ready {
+        // 构造 prompt（注入前置节点的 result_summary）
         // 通过 adapter 启动 subagent
-        // 解析结果，调用 dag.update_tasks()
+        // 解析结果，调用 kerrigan-dag update_nodes()
     }
 }
 ```
 
 **CLI 接口**：
+
 ```bash
 kerrigan run <task-id> --adapter claude
 kerrigan run <task-id> --dry-run
@@ -239,12 +215,13 @@ kerrigan run <task-id> --dry-run
 
 ---
 
-### Step 6: Skills 封装
+### Step 5: Skills 封装
 
 **目标**：将 DAG 引擎和 Kerrigan CLI 封装为 skills。
 
-**文件**（放在 monorepo docs/ 或 kerrigan-cli/skills/）：
-```
+**文件**（放在 monorepo 或 kerrigan-cli 下）：
+
+```text
 skills/
 ├── kerrigan-dag/
 │   ├── SKILL.md           # DAG 操作 skill
@@ -268,9 +245,9 @@ skills/
 |-------|------|------|
 | serde, serde_json | 序列化 | both |
 | clap (derive) | CLI 解析 | both |
-| uuid | task id 生成 | dag-cli |
+| uuid | task/node id 生成 | dag-engine |
 | thiserror | 错误类型 | both |
-| fs2 | 文件锁 | dag-cli |
+| fs2 | 文件锁 | dag-engine |
 | tokio | 异步运行时 | kerrigan-cli |
 | minijinja | 模板渲染 | kerrigan-cli |
 | assert_cmd, predicates | CLI 测试 | both (dev) |
@@ -278,12 +255,12 @@ skills/
 
 ## 执行顺序
 
-```
+```text
 kerrigan-dag-engine:
-  Step 1 (DAG 引擎库) → Step 2 (DAG CLI)
+  Step 1 (引擎库 + 存储管理) → Step 2 (CLI)
 
 kerrigan-cli:
-  Step 3 (~/.kerrigan/ + 注册表) → Step 4 (Agent Adapter) → Step 5 (主循环) → Step 6 (Skills)
+  Step 3 (Agent Adapter) → Step 4 (主循环) → Step 5 (Skills)
 ```
 
-Step 1-2 在 kerrigan-dag-engine repo 完成后，kerrigan-cli 通过 path 依赖或 git 依赖引用。每一步完成后提交 + push。
+Step 1-2 在 kerrigan-dag-engine repo 完成后，kerrigan-cli 通过 path 依赖引用。每一步完成后提交 + push。

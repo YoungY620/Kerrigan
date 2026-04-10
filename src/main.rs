@@ -73,11 +73,16 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 ))
             })?;
 
+            // Default skills_dir to ~/.kerrigan/skills/ (deployed by kerrigan-storage init)
+            let skills_dir = skills_dir
+                .map(std::path::PathBuf::from)
+                .or_else(|| Some(engine.skills_dir()));
+
             let config = RunConfig {
                 task_id: task_id.clone(),
                 task_summary: task_entry.summary.clone(),
                 workdir: std::path::PathBuf::from(&task_entry.workdir),
-                skills_dir: skills_dir.map(std::path::PathBuf::from),
+                skills_dir,
                 max_turns_per_session: max_turns,
                 max_fix_attempts: 3,
             };

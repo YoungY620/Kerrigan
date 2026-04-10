@@ -11,7 +11,7 @@ Your job in this first round is to:
 3. Use the **kerrigan-storage** skill to add these sub-tasks as new DAG nodes (with appropriate dependencies)
 4. Mark the origin node as `succeeded` with a `result_summary` describing your understanding and the plan you've created
 
-Refer to the **kerrigan-storage** skill documentation for all available operations and usage examples.
+The **kerrigan-storage** skill documentation is available at `{{ skills_path }}`. Read it for all available operations and usage examples.
 
 ## Rules
 - Each node executes **exactly once**. Never retry in place — create new nodes instead.

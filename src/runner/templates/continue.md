@@ -7,4 +7,4 @@ New ready nodes are available. Continue orchestrating.
 - **{{ node.id }}**: {{ node.summary }}
 {% endfor %}
 
-Use the **kerrigan-storage** skill to read node details, execute via subagent, and update status.
+Use the **kerrigan-storage** skill (docs at `{{ skills_path }}`) to read node details, execute via subagent, and update status.

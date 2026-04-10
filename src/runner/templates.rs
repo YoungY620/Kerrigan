@@ -18,23 +18,30 @@ fn env() -> Environment<'static> {
 }
 
 /// Render the init template (first round of a new task, with auto-created origin node).
-pub fn render_init(task_summary: &str, origin_node_id: &str) -> String {
+pub fn render_init(task_summary: &str, origin_node_id: &str, skills_path: &str) -> String {
     let env = env();
     let tmpl = env.get_template("init").unwrap();
     tmpl.render(context! {
         task_summary => task_summary,
         origin_node_id => origin_node_id,
+        skills_path => skills_path,
     })
     .unwrap()
 }
 
 /// Render the continue template (subsequent rounds, same session).
-pub fn render_continue(task_id: &str, round: usize, ready_nodes: &[NodeSummary]) -> String {
+pub fn render_continue(
+    task_id: &str,
+    round: usize,
+    ready_nodes: &[NodeSummary],
+    skills_path: &str,
+) -> String {
     let env = env();
     let tmpl = env.get_template("continue").unwrap();
     tmpl.render(context! {
         task_id => task_id,
         round => round,
+        skills_path => skills_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -44,12 +51,18 @@ pub fn render_continue(task_id: &str, round: usize, ready_nodes: &[NodeSummary])
 }
 
 /// Render the resume template (new session after rotation or restart).
-pub fn render_resume(task_id: &str, task_summary: &str, ready_nodes: &[NodeSummary]) -> String {
+pub fn render_resume(
+    task_id: &str,
+    task_summary: &str,
+    ready_nodes: &[NodeSummary],
+    skills_path: &str,
+) -> String {
     let env = env();
     let tmpl = env.get_template("resume").unwrap();
     tmpl.render(context! {
         task_id => task_id,
         task_summary => task_summary,
+        skills_path => skills_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -93,28 +106,32 @@ mod tests {
         ]
     }
 
+    const SKILLS_PATH: &str = "/home/user/.kerrigan/skills/kerrigan-storage/SKILL.md";
+
     #[test]
     fn init_template_renders() {
-        let result = render_init("Refactor auth module", "origin-node-123");
+        let result = render_init("Refactor auth module", "origin-node-123", SKILLS_PATH);
         assert!(result.contains("Refactor auth module"));
         assert!(result.contains("origin-node-123"));
-        assert!(result.contains("kerrigan-storage"));
+        assert!(result.contains(SKILLS_PATH));
         assert!(result.contains("研究"));
     }
 
     #[test]
     fn continue_template_renders() {
-        let result = render_continue("task-abc", 3, &sample_nodes());
+        let result = render_continue("task-abc", 3, &sample_nodes(), SKILLS_PATH);
         assert!(result.contains("Round 3"));
         assert!(result.contains("n1"));
+        assert!(result.contains(SKILLS_PATH));
     }
 
     #[test]
     fn resume_template_renders() {
-        let result = render_resume("task-abc", "Refactor auth", &sample_nodes());
+        let result = render_resume("task-abc", "Refactor auth", &sample_nodes(), SKILLS_PATH);
         assert!(result.contains("new session"));
         assert!(result.contains("Refactor auth"));
         assert!(result.contains("n1"));
+        assert!(result.contains(SKILLS_PATH));
     }
 
     #[test]

@@ -113,7 +113,36 @@ kerrigan-storage get --task <task-id> --node <node-id>                   # get_n
 
 ---
 
-### Step 3: Agent Adapter（kerrigan-cli）
+### Step 3: Storage Skills 封装（kerrigan-storage）
+
+**目标**：将 Storage CLI 封装为 skills，供 loop 内 agent 通过 DAG skills 操作 DAG。这一步必须在 kerrigan-cli 主循环之前完成，因为 agent 依赖这些 skills 来编排任务。
+
+**文件**：
+
+```text
+kerrigan-storage/
+└── skills/
+    └── kerrigan-storage/
+        ├── SKILL.md           # DAG 操作 skill 说明：何时触发、可用操作、使用示例
+        └── scripts/           # 调用 kerrigan-storage CLI 子命令的 wrapper
+```
+
+**SKILL.md 内容**：
+- 描述所有可用操作：task create/list、add/list/ready/update/get
+- 每个操作的参数说明和输出格式
+- 典型使用流程示例（查看 ready 节点 → get 详情 → subagent 执行 → update 回写结果）
+- 何时应该 add 新节点（失败重试、任务拆分）
+
+**测试要点**：
+- SKILL.md 内容完整性：覆盖所有 CLI 子命令
+- 每个 script 独立运行不报错
+- script 调用 CLI 后输出格式正确
+
+**验证方式**：手动验证每个 script + 对照 Step 2 的 CLI 输出
+
+---
+
+### Step 4: Agent Adapter（kerrigan-cli）
 
 **目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，首批支持 Claude Code 和 Kimi CLI 两个 adapter，默认 YOLO 模式。
 
@@ -167,7 +196,7 @@ pub trait AgentAdapter {
 
 ---
 
-### Step 4: 提示词模板 + 主循环（kerrigan-cli）
+### Step 5: 提示词模板 + 主循环（kerrigan-cli）
 
 **目标**：实现 Kerrigan 的核心编排循环。
 
@@ -225,25 +254,18 @@ kerrigan run <task-id> --adapter claude
 
 ---
 
-### Step 5: Skills 封装
+### Step 6: Kerrigan Swarm Skills 封装
 
-**目标**：将 Storage和 Kerrigan CLI 封装为 skills。
+**目标**：将 Kerrigan CLI 封装为 skills，供外部 agent 创建/管理后台任务。
 
-**文件**（放在 monorepo 或 kerrigan-cli 下）：
+**文件**：
 
 ```text
 skills/
-├── kerrigan-storage/
-│   ├── SKILL.md           # DAG 操作 skill
-│   └── scripts/           # 调用 kerrigan-storage 子命令
 └── kerrigan-swarm/
     ├── SKILL.md           # 任务管理 skill
     └── scripts/           # 调用 kerrigan task/run
 ```
-
-两层 skills：
-1. **kerrigan-storage skills**：供 loop 内 agent 操作 DAG
-2. **kerrigan-swarm skills**：供外部 agent 创建/管理后台任务
 
 **验证方式**：手动验证 + 可选集成测试
 
@@ -267,10 +289,10 @@ skills/
 
 ```text
 kerrigan-storage:
-  Step 1 (Storage 库 + 存储管理) → Step 2 (CLI)
+  Step 1 (Storage 库 + 存储管理) → Step 2 (CLI) → Step 3 (Storage Skills)
 
 kerrigan-cli:
-  Step 3 (Agent Adapter) → Step 4 (主循环) → Step 5 (Skills)
+  Step 4 (Agent Adapter) → Step 5 (主循环) → Step 6 (Kerrigan Swarm Skills)
 ```
 
-Step 1-2 在 kerrigan-storage repo 完成后，kerrigan-cli 通过 path 依赖引用。每一步完成后提交 + push。
+Step 1-3 在 kerrigan-storage repo 完成后，kerrigan-cli 通过 path 依赖引用。每一步完成后提交 + push。

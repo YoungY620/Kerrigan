@@ -6,6 +6,13 @@ use tokio::process::Command;
 /// Claude Code adapter.
 ///
 /// Invokes `claude` CLI in non-interactive YOLO mode with `--print`.
+///
+/// Key flags verified against `claude --help`:
+/// - `--print`: non-interactive output mode
+/// - `--dangerously-skip-permissions`: YOLO mode
+/// - `--session-id <uuid>`: specify session (must be valid UUID)
+/// - `--resume <session-id>`: resume a session by ID
+/// - `--add-dir <path>`: add directory to workspace scope (used for skills)
 #[derive(Default)]
 pub struct ClaudeAdapter;
 
@@ -26,11 +33,13 @@ impl ClaudeAdapter {
         cmd.args(["--print", "--dangerously-skip-permissions"]);
         cmd.args(["--session-id", session_id]);
 
+        // Claude Code doesn't have --skill-dir; use --add-dir to expose skills directory
         if let Some(dir) = skills_dir {
-            cmd.args(["--skill-dir", &dir.to_string_lossy()]);
+            cmd.args(["--add-dir", &dir.to_string_lossy()]);
         }
 
-        cmd.args(["--prompt", prompt]);
+        // Use -p flag for prompt to avoid positional arg ambiguity with --add-dir
+        cmd.args(["-p", prompt]);
         cmd
     }
 
@@ -38,8 +47,8 @@ impl ClaudeAdapter {
         let mut cmd = Command::new("claude");
         cmd.current_dir(workdir);
         cmd.args(["--print", "--dangerously-skip-permissions"]);
-        cmd.args(["--session-id", session_id]);
-        cmd.args(["--resume", "--prompt", prompt]);
+        cmd.args(["--resume", session_id]);
+        cmd.args(["-p", prompt]);
         cmd
     }
 }
@@ -97,12 +106,13 @@ impl AgentAdapter for ClaudeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn run_command_construction() {
         let adapter = ClaudeAdapter::new();
         let cmd = adapter.build_run_command(
             "hello world",
-            "sess_001",
+            "550e8400-e29b-41d4-a716-446655440000",
             Some(Path::new("/tmp/skills")),
             Path::new("/tmp/work"),
         );
@@ -113,10 +123,10 @@ mod tests {
         assert!(args.contains(&"--print"));
         assert!(args.contains(&"--dangerously-skip-permissions"));
         assert!(args.contains(&"--session-id"));
-        assert!(args.contains(&"sess_001"));
-        assert!(args.contains(&"--skill-dir"));
+        assert!(args.contains(&"550e8400-e29b-41d4-a716-446655440000"));
+        assert!(args.contains(&"--add-dir")); // not --skill-dir
         assert!(args.contains(&"/tmp/skills"));
-        assert!(args.contains(&"--prompt"));
+        assert!(args.contains(&"-p"));
         assert!(args.contains(&"hello world"));
     }
 
@@ -127,21 +137,25 @@ mod tests {
         let cmd = cmd.as_std();
 
         let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert!(!args.contains(&"--skill-dir"));
+        assert!(!args.contains(&"--add-dir"));
     }
 
     #[test]
     fn resume_command_construction() {
         let adapter = ClaudeAdapter::new();
-        let cmd = adapter.build_resume_command("sess_001", "continue please", Path::new("/tmp"));
+        let cmd = adapter.build_resume_command(
+            "550e8400-e29b-41d4-a716-446655440000",
+            "continue please",
+            Path::new("/tmp"),
+        );
         let cmd = cmd.as_std();
 
         let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert!(args.contains(&"--resume"));
-        assert!(args.contains(&"--session-id"));
-        assert!(args.contains(&"sess_001"));
-        assert!(args.contains(&"--prompt"));
+        assert!(args.contains(&"550e8400-e29b-41d4-a716-446655440000"));
+        assert!(args.contains(&"-p"));
         assert!(args.contains(&"continue please"));
         assert!(args.contains(&"--dangerously-skip-permissions"));
+        assert!(!args.contains(&"--session-id")); // resume uses --resume <id>, not --session-id
     }
 }

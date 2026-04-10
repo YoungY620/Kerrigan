@@ -46,7 +46,11 @@ impl StorageEngine {
 
     // ── Init ──
 
+    // SKILL.md compiled into the binary
+    const SKILL_MD: &str = include_str!("../skills/kerrigan-storage/SKILL.md");
+
     /// Initialize `~/.kerrigan/` directory structure. Idempotent.
+    /// Also deploys the kerrigan-storage skill to `~/.kerrigan/skills/`.
     pub fn init(&self) -> Result<()> {
         fs::create_dir_all(self.root.join("tasks")).map_err(|e| StorageError::io(&self.root, e))?;
 
@@ -54,7 +58,19 @@ impl StorageEngine {
         if !reg_path.exists() {
             persist::atomic_write(&reg_path, &Registry::default())?;
         }
+
+        // Deploy bundled skill
+        let skill_dir = self.skills_dir().join("kerrigan-storage");
+        fs::create_dir_all(&skill_dir).map_err(|e| StorageError::io(&skill_dir, e))?;
+        let skill_path = skill_dir.join("SKILL.md");
+        fs::write(&skill_path, Self::SKILL_MD).map_err(|e| StorageError::io(&skill_path, e))?;
+
         Ok(())
+    }
+
+    /// Path to the skills directory: `~/.kerrigan/skills/`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.root.join("skills")
     }
 
     // ── Task management ──

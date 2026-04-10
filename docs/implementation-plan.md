@@ -66,7 +66,7 @@ DAG 操作（所有接口通过 task_id 定位 dag.json）：
 - update_nodes 批量：一次更新多个节点
 - 环检测：add_node 不能引入环
 - 持久化往返：engine → save → load → engine，状态完全一致
-- 并发文件锁：两个进程同时操作同一个 dag.json
+- 并发文件锁：多个 swarm job 同时操作注册表和公共区域文件时的互斥
 
 **验证方式**：`cargo test`，100% 通过
 

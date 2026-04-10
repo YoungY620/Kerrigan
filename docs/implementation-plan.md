@@ -217,6 +217,7 @@ kerrigan-cli/src/
 1. **init.md**：首轮，注入 DAG skills 说明 + ready 节点 + 任务描述
 2. **continue.md**：后续轮次，注入最新 DAG 状态
 3. **resume.md**：新 session 恢复，引导读取所有信息后继续
+4. **fix.md**：静态检查不通过时，注入具体的不一致问题列表，要求 agent 修正 DAG
 
 **主循环**：
 

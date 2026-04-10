@@ -111,7 +111,8 @@ Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session �
 
 1. **初始化**：一个任务的第一个提示词，第一个 turn。注入所有 ready 节点的 summary，要求 agent 通过 Storage skill 获取详情和前置结果，用 subagent 并行执行，完成后通过 skill 回写结果和衍生新节点。
 2. **Continue turn**：resume 当前 session，注入最新 ready 节点 summary。
-3. **Resume 任务**：中断恢复时开一个新 session。注入最新 ready 节点 summary，引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
+3. **Resume 任务**：中断恢复或 session 轮换时开一个新 session。注入最新 ready 节点 summary，引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
+4. **Fix**：静态检查不通过时，resume 当前 session，注入具体的不一致问题列表，要求 agent 修正 DAG。
 
 ### 外部信息输入
 

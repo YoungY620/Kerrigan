@@ -97,11 +97,21 @@ Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session �
 
 初始化一个任务后，Kerrigan 框架准备好标准的文件系统，然后进入循环。
 
-每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 DAG engine skill 来获取节点详情、执行任务、回写结果。需要准备三个提示词模板：
+同一任务内所有轮次复用同一个 agent session（除非中断后 resume，则开新 session）。每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 Storage skill 来获取节点详情、执行任务、回写结果。
 
-1. **初始化**：一个任务的第一个提示词，第一个 turn。注入所有 ready 节点的 summary，要求 agent 通过 DAG engine skill 获取详情和前置结果，用 subagent 并行执行，完成后通过 skill 回写结果和衍生新节点。
-2. **Continue turn**：调用 agent CLI 的 resume，注入最新 ready 节点 summary，继续当前 session。
-3. **Resume 任务**：不使用原 session 的 resume，而是开一个新 session。注入最新 ready 节点 summary，引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
+每轮 agent 执行完成后，kerrigan 程序侧对 DAG 进行静态一致性检查：
+- 前驱为空的节点是否为 Ready 状态
+- Ready 节点是否确实没有未完成的前驱
+- Succeeded/Failed 节点是否有 result_summary / failure_reason
+- 必要字段（summary、description）是否非空
+
+如果检查不通过，构造修复提示词 resume 同一 session 要求 agent 修正，直到 DAG 状态一致。
+
+需要准备三个提示词模板：
+
+1. **初始化**：一个任务的第一个提示词，第一个 turn。注入所有 ready 节点的 summary，要求 agent 通过 Storage skill 获取详情和前置结果，用 subagent 并行执行，完成后通过 skill 回写结果和衍生新节点。
+2. **Continue turn**：resume 当前 session，注入最新 ready 节点 summary。
+3. **Resume 任务**：中断恢复时开一个新 session。注入最新 ready 节点 summary，引导 agent 仔细阅读所有可用、可读、可索引的信息，了解问题全貌后继续。
 
 ### 外部信息输入
 

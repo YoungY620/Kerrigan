@@ -227,13 +227,26 @@ loop {
     ready = kerrigan-storage ready(task_id)  // 仅用于检查终止条件
     if ready.is_empty() { break }
 
-    // 构造本轮提示词：
+    // 1. 构造本轮提示词：
     //   - 注入所有 ready 节点的 summary 信息（kerrigan 程序侧预先查询并拼入）
-    //   - 要求 agent 使用 DAG engine skill 获取节点详情和前置结果
+    //   - 要求 agent 使用 Storage skill 获取节点详情和前置结果
     //   - 要求 agent 用 subagent 并行执行 ready 节点
-    //   - 要求 agent 通过 DAG engine skill 回写结果、衍生新节点
+    //   - 要求 agent 通过 Storage skill 回写结果、衍生新节点
     prompt = render_template(ready_nodes_summary)
-    adapter.run(prompt, session_id, skills_dir)
+    adapter.run(prompt, session_id, skills_dir)  // 同一任务内复用同一个 session
+
+    // 2. 静态检查 DAG 一致性（程序侧，不调用模型）：
+    //   - 前驱为空的节点是否为 Ready 状态
+    //   - Ready 节点是否确实没有未完成的前驱
+    //   - Succeeded/Failed 节点是否有 result_summary / failure_reason
+    //   - 必要字段（summary、description）是否非空
+    //   如果发现不一致，构造修复提示词，resume 同一 session 要求 agent 修正
+    issues = validate_dag(task_id)
+    while !issues.is_empty() {
+        fix_prompt = render_fix_template(issues)
+        adapter.resume(session_id, fix_prompt)
+        issues = validate_dag(task_id)
+    }
 }
 ```
 
@@ -249,6 +262,9 @@ kerrigan run <task-id> --adapter claude
 - 失败不传播，循环继续
 - 衍生任务正确插入
 - 留言板注入
+- session 复用：同一任务内所有轮次使用同一 session，中断后 resume 开新 session
+- 静态检查：前驱为空的节点必须 Ready、Ready 节点无未完成前驱、完成节点必须有结果、必要字段非空
+- 修复循环：检查不通过时 resume 同一 session 要求修正，直到一致
 
 **验证方式**：`cargo test` + mock adapter 端到端跑完 3 节点 DAG
 

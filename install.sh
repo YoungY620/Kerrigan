@@ -140,6 +140,21 @@ main() {
 
     check_path
 
+    # Check for agent CLI
+    if command -v claude &>/dev/null; then
+        info "Agent backend: claude (default)"
+    elif command -v kimi &>/dev/null; then
+        info "Agent backend: kimi (use --adapter kimi to select)"
+    else
+        warn "No agent CLI found"
+        echo ""
+        echo "  Kerrigan requires at least one agent backend to run tasks:"
+        echo "    Claude Code: https://docs.anthropic.com/en/docs/claude-code"
+        echo "    Kimi CLI:    (internal tool)"
+        echo ""
+        echo "  Default: --adapter claude"
+    fi
+
     echo ""
     info "kerrigan-storage installed successfully!"
     echo ""

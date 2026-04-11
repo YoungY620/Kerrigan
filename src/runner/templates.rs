@@ -18,13 +18,19 @@ fn env() -> Environment<'static> {
 }
 
 /// Render the init template (first round of a new task, with auto-created origin node).
-pub fn render_init(task_summary: &str, origin_node_id: &str, skills_path: &str) -> String {
+pub fn render_init(
+    task_summary: &str,
+    origin_node_id: &str,
+    skills_path: &str,
+    guide_path: &str,
+) -> String {
     let env = env();
     let tmpl = env.get_template("init").unwrap();
     tmpl.render(context! {
         task_summary => task_summary,
         origin_node_id => origin_node_id,
         skills_path => skills_path,
+        guide_path => guide_path,
     })
     .unwrap()
 }
@@ -35,6 +41,7 @@ pub fn render_continue(
     round: usize,
     ready_nodes: &[NodeSummary],
     skills_path: &str,
+    guide_path: &str,
 ) -> String {
     let env = env();
     let tmpl = env.get_template("continue").unwrap();
@@ -42,6 +49,7 @@ pub fn render_continue(
         task_id => task_id,
         round => round,
         skills_path => skills_path,
+        guide_path => guide_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -56,6 +64,7 @@ pub fn render_resume(
     task_summary: &str,
     ready_nodes: &[NodeSummary],
     skills_path: &str,
+    guide_path: &str,
 ) -> String {
     let env = env();
     let tmpl = env.get_template("resume").unwrap();
@@ -63,6 +72,7 @@ pub fn render_resume(
         task_id => task_id,
         task_summary => task_summary,
         skills_path => skills_path,
+        guide_path => guide_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -107,31 +117,96 @@ mod tests {
     }
 
     const SKILLS_PATH: &str = "/home/user/.kerrigan/skills/kerrigan-storage/SKILL.md";
+    const GUIDE_PATH: &str = "/home/user/.kerrigan/shared/guide.md";
 
     #[test]
     fn init_template_renders() {
-        let result = render_init("Refactor auth module", "origin-node-123", SKILLS_PATH);
+        let result = render_init(
+            "Refactor auth module",
+            "origin-node-123",
+            SKILLS_PATH,
+            GUIDE_PATH,
+        );
         assert!(result.contains("Refactor auth module"));
         assert!(result.contains("origin-node-123"));
         assert!(result.contains(SKILLS_PATH));
+        assert!(result.contains(GUIDE_PATH));
         assert!(result.contains("研究"));
     }
 
     #[test]
     fn continue_template_renders() {
-        let result = render_continue("task-abc", 3, &sample_nodes(), SKILLS_PATH);
+        let result = render_continue("task-abc", 3, &sample_nodes(), SKILLS_PATH, GUIDE_PATH);
         assert!(result.contains("Round 3"));
         assert!(result.contains("n1"));
+        assert!(result.contains("n2"));
+        assert!(result.contains("Analyze code"));
         assert!(result.contains(SKILLS_PATH));
+        assert!(result.contains(GUIDE_PATH));
     }
 
     #[test]
     fn resume_template_renders() {
-        let result = render_resume("task-abc", "Refactor auth", &sample_nodes(), SKILLS_PATH);
+        let result = render_resume(
+            "task-abc",
+            "Refactor auth",
+            &sample_nodes(),
+            SKILLS_PATH,
+            GUIDE_PATH,
+        );
         assert!(result.contains("new session"));
         assert!(result.contains("Refactor auth"));
         assert!(result.contains("n1"));
+        assert!(result.contains("n2"));
         assert!(result.contains(SKILLS_PATH));
+        assert!(result.contains(GUIDE_PATH));
+    }
+
+    #[test]
+    fn init_template_contains_guide_instructions() {
+        let result = render_init("Test task", "origin-1", SKILLS_PATH, GUIDE_PATH);
+        // Should instruct agent to read guide before starting
+        assert!(result.contains("guide"));
+        assert!(result.contains("result_summary"));
+        assert!(result.contains("failure_reason"));
+    }
+
+    #[test]
+    fn resume_template_contains_guide_instructions() {
+        let result = render_resume(
+            "task-abc",
+            "Test task",
+            &sample_nodes(),
+            SKILLS_PATH,
+            GUIDE_PATH,
+        );
+        // Resume in new session should reference guide
+        assert!(result.contains("guide"));
+        assert!(result.contains("result_summary"));
+    }
+
+    #[test]
+    fn templates_with_empty_guide_path() {
+        // guide_path can be empty if shared_dir is not configured
+        let result = render_init("Test task", "origin-1", SKILLS_PATH, "");
+        assert!(result.contains("Test task"));
+        assert!(result.contains("origin-1"));
+
+        let result = render_continue("task-abc", 1, &sample_nodes(), SKILLS_PATH, "");
+        assert!(result.contains("n1"));
+
+        let result = render_resume("task-abc", "Test", &sample_nodes(), SKILLS_PATH, "");
+        assert!(result.contains("n1"));
+    }
+
+    #[test]
+    fn templates_with_empty_nodes() {
+        let empty: Vec<NodeSummary> = vec![];
+        let result = render_continue("task-abc", 1, &empty, SKILLS_PATH, GUIDE_PATH);
+        assert!(result.contains("Round 1"));
+
+        let result = render_resume("task-abc", "Test", &empty, SKILLS_PATH, GUIDE_PATH);
+        assert!(result.contains("Test"));
     }
 
     #[test]

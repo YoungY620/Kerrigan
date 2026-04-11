@@ -83,6 +83,7 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 task_summary: task_entry.summary.clone(),
                 workdir: std::path::PathBuf::from(&task_entry.workdir),
                 skills_dir,
+                shared_dir: Some(engine.shared_dir()),
                 max_turns_per_session: max_turns,
                 max_fix_attempts: 3,
             };

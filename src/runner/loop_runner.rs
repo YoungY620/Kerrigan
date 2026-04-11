@@ -16,6 +16,8 @@ pub struct RunConfig {
     pub workdir: std::path::PathBuf,
     /// Path to the skills directory
     pub skills_dir: Option<std::path::PathBuf>,
+    /// Path to the shared directory (guide files)
+    pub shared_dir: Option<std::path::PathBuf>,
     /// Max continue turns before rotating session (default: 10)
     pub max_turns_per_session: usize,
     /// Max fix attempts per round (default: 3)
@@ -29,6 +31,7 @@ impl Default for RunConfig {
             task_summary: String::new(),
             workdir: std::path::PathBuf::from("."),
             skills_dir: None,
+            shared_dir: None,
             max_turns_per_session: 10,
             max_fix_attempts: 3,
         }
@@ -99,17 +102,30 @@ pub async fn run_loop(
             })
             .unwrap_or_default();
 
+        // Resolve guide path for prompt injection
+        let guide_path = config
+            .shared_dir
+            .as_ref()
+            .map(|d| d.join("guide.md").to_string_lossy().into_owned())
+            .unwrap_or_default();
+
         // Build prompt
         let prompt = if let Some(ref origin_id) = origin_node_id
             && round == 1
         {
             // Very first round: init with origin node
-            templates::render_init(&config.task_summary, origin_id, &skills_path)
+            templates::render_init(&config.task_summary, origin_id, &skills_path, &guide_path)
         } else if is_first_round {
             // New session (after rotation or restart)
-            templates::render_resume(&config.task_id, &config.task_summary, &ready, &skills_path)
+            templates::render_resume(
+                &config.task_id,
+                &config.task_summary,
+                &ready,
+                &skills_path,
+                &guide_path,
+            )
         } else {
-            templates::render_continue(&config.task_id, round, &ready, &skills_path)
+            templates::render_continue(&config.task_id, round, &ready, &skills_path, &guide_path)
         };
 
         // Inject board content if changed

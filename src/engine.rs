@@ -46,11 +46,18 @@ impl StorageEngine {
 
     // ── Init ──
 
-    // SKILL.md compiled into the binary
+    // Files compiled into the binary
     const SKILL_MD: &str = include_str!("../skills/kerrigan-storage/SKILL.md");
+    const GUIDE_MD: &str = include_str!("../shared/guide.md");
+    const GUIDE_SOFTWARE_DEVELOPMENT_MD: &str =
+        include_str!("../shared/guide-software-development.md");
+    const GUIDE_RESEARCH_MD: &str = include_str!("../shared/guide-research.md");
+    const GUIDE_DECISION_AB_TESTING_MD: &str =
+        include_str!("../shared/guide-decision-ab-testing.md");
+    const GUIDE_GIT_MANAGEMENT_MD: &str = include_str!("../shared/guide-git-management.md");
 
     /// Initialize `~/.kerrigan/` directory structure. Idempotent.
-    /// Also deploys the kerrigan-storage skill to `~/.kerrigan/skills/`.
+    /// Deploys skills and guide files.
     pub fn init(&self) -> Result<()> {
         fs::create_dir_all(self.root.join("tasks")).map_err(|e| StorageError::io(&self.root, e))?;
 
@@ -65,12 +72,37 @@ impl StorageEngine {
         let skill_path = skill_dir.join("SKILL.md");
         fs::write(&skill_path, Self::SKILL_MD).map_err(|e| StorageError::io(&skill_path, e))?;
 
+        // Deploy bundled guide files
+        let shared = self.shared_dir();
+        fs::create_dir_all(&shared).map_err(|e| StorageError::io(&shared, e))?;
+        for (name, content) in [
+            ("guide.md", Self::GUIDE_MD),
+            (
+                "guide-software-development.md",
+                Self::GUIDE_SOFTWARE_DEVELOPMENT_MD,
+            ),
+            ("guide-research.md", Self::GUIDE_RESEARCH_MD),
+            (
+                "guide-decision-ab-testing.md",
+                Self::GUIDE_DECISION_AB_TESTING_MD,
+            ),
+            ("guide-git-management.md", Self::GUIDE_GIT_MANAGEMENT_MD),
+        ] {
+            let path = shared.join(name);
+            fs::write(&path, content).map_err(|e| StorageError::io(&path, e))?;
+        }
+
         Ok(())
     }
 
     /// Path to the skills directory: `~/.kerrigan/skills/`.
     pub fn skills_dir(&self) -> PathBuf {
         self.root.join("skills")
+    }
+
+    /// Path to the shared directory: `~/.kerrigan/shared/`.
+    pub fn shared_dir(&self) -> PathBuf {
+        self.root.join("shared")
     }
 
     // ── Task management ──
@@ -82,7 +114,7 @@ impl StorageEngine {
 
         let task_id = uuid::Uuid::new_v4().to_string();
         let dir = self.task_dir(&task_id);
-        fs::create_dir_all(dir.join("shared")).map_err(|e| StorageError::io(&dir, e))?;
+        fs::create_dir_all(&dir).map_err(|e| StorageError::io(&dir, e))?;
 
         // Create initial files
         persist::atomic_write(&self.dag_path(&task_id), &Dag::default())?;

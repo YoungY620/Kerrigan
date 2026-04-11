@@ -50,6 +50,55 @@ fn init_updates_skill_on_reinit() {
 }
 
 #[test]
+fn init_deploys_all_guide_files() {
+    let (tmp, _engine) = setup();
+    let shared = tmp.path().join("shared");
+    let expected_files = [
+        "guide.md",
+        "guide-software-development.md",
+        "guide-research.md",
+        "guide-decision-ab-testing.md",
+        "guide-git-management.md",
+    ];
+    for name in &expected_files {
+        let path = shared.join(name);
+        assert!(path.exists(), "{name} should be deployed on init");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.is_empty(), "{name} should not be empty");
+    }
+}
+
+#[test]
+fn init_updates_guide_on_reinit() {
+    let (tmp, engine) = setup();
+    let guide_path = tmp.path().join("shared").join("guide.md");
+    std::fs::write(&guide_path, "old content").unwrap();
+    engine.init().unwrap();
+    let content = std::fs::read_to_string(&guide_path).unwrap();
+    assert!(
+        content.contains("Kerrigan"),
+        "guide.md should be restored on reinit"
+    );
+}
+
+#[test]
+fn shared_dir_returns_correct_path() {
+    let (tmp, engine) = setup();
+    assert_eq!(engine.shared_dir(), tmp.path().join("shared"));
+}
+
+#[test]
+fn task_create_does_not_create_per_task_shared() {
+    let (tmp, engine) = setup();
+    let id = engine.task_create("test", "/tmp").unwrap();
+    let task_shared = tmp.path().join("tasks").join(&id).join("shared");
+    assert!(
+        !task_shared.exists(),
+        "per-task shared/ should not be created"
+    );
+}
+
+#[test]
 fn not_initialized_error() {
     let tmp = TempDir::new().unwrap();
     let engine = StorageEngine::new(tmp.path());
@@ -90,7 +139,9 @@ fn task_directory_structure() {
     assert!(dir.join("config.json").exists());
     assert!(dir.join("sessions.json").exists());
     assert!(dir.join("board.md").exists());
-    assert!(dir.join("shared").is_dir());
+    // Global shared/ dir (not per-task) is created by init()
+    assert!(tmp.path().join("shared").is_dir());
+    assert!(tmp.path().join("shared").join("guide.md").exists());
 }
 
 // ── DAG: Basic CRUD ──

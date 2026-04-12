@@ -14,15 +14,15 @@
 
 | Type | 含义 | 版本递增 |
 |------|------|---------|
-| `fix:` | 修复 bug | patch (0.0.Z) |
 | `feat:` | 新功能 | patch (0.0.Z) |
-| `docs:` | 文档变更 | patch (0.0.Z) |
-| `chore:` | 构建/工具/依赖 | patch (0.0.Z) |
-| `ci:` | CI 配置 | patch (0.0.Z) |
-| `refactor:` | 重构（不改行为） | patch (0.0.Z) |
-| `test:` | 测试 | patch (0.0.Z) |
+| `fix:` | 修复 bug | patch (0.0.Z) |
 | `release:` | 正式发布稳定版本 | minor (0.Y.0) |
 | `BREAKING CHANGE:` | 彻底重写/换架构/换语言 | major (X.0.0) |
+| `docs:` | 文档变更 | 不触发版本递增 |
+| `chore:` | 构建/工具/依赖 | 不触发版本递增 |
+| `ci:` | CI 配置 | 不触发版本递增 |
+| `refactor:` | 重构（不改行为） | 不触发版本递增 |
+| `test:` | 测试 | 不触发版本递增 |
 
 ### 规则
 

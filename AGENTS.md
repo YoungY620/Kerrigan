@@ -52,6 +52,17 @@ docs: update README for monorepo structure
 BREAKING CHANGE: rewrite storage engine in Go
 ```
 
+## 发版
+
+使用 `make release` 发版。脚本自动从 commit types 推断版本号，调用 kimi 生成 CHANGELOG，更新 Cargo.toml 版本，打 tag 并 push。
+
+```bash
+make release              # 自动版本号
+make release VERSION=1.0.0  # 手动覆盖
+```
+
+发版前需要一个 `release:` 前缀的 commit 来触发 minor 版本递增。如果没有 releasable commits（feat/fix/release/BREAKING），脚本自动跳过。
+
 ## 项目结构
 
 Monorepo，两个 Rust crate：

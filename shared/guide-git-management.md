@@ -2,6 +2,8 @@
 
 当多个开发节点并行修改同一个 repo 时，需要隔离策略来避免冲突。
 
+关于 feature 如何拆分为递归的子任务树、拆分标准和回溯合并流程，参考 `{{ shared_dir }}/guide-software-development.md`。
+
 ---
 
 ## 隔离策略：并行轨道
@@ -20,7 +22,9 @@ workspace/
 
 每个轨道是一个独立的 repo clone，彼此等价。需要几条并行就创建几个。轨道是长期复用的：feature 完成合并后，拉取最新 main 即可接下一个 feature。
 
-orchestrator 在分配开发节点时，在节点 description 中指定使用哪条轨道（如"在 track-2 上开发"），确保同一时刻每条轨道上只有一个 feature 在进行。
+orchestrator 在分配开发节点时，在节点 description 中指定使用哪条轨道（如"在 track-2 上开发"），确保同一时刻每条轨道上只有一个任务在进行。
+
+轨道上执行的必须是分支树的**叶节点**（最底层未完成的子分支），或**子节点已全部合并、准备做本层整合的 feature 节点**。不允许在轨道上执行还没拆分完的大 feature。
 
 ---
 

@@ -2,7 +2,36 @@
 
 ## 总体模式：小步迭代
 
-每个 feature 应该是"一次可以完整交付并测试的最小有意义变更"。description 超过 500 字还说不清楚，说明太大了——应该拆分。
+### Feature 与分支的对应关系
+
+一个外部 feature 请求对应 git 上的一个 feature 分支。如果这个 feature 太大，就拆分为子任务，每个子任务从 feature 分支再开子分支。这是**递归**的——子分支如果还是太大，继续拆子子分支。
+
+**拆分标准**（辅助判断，满足任一则应拆分）：
+- description 超过 500 字仍说不清楚具体要做什么
+- 预计修改超过 10 个文件或 200 行代码
+
+**开发完成是回溯过程**：最底层子分支完成 → 合并到上一层 feature 分支 → 上层做整合验证 → 继续回溯 → 最终 feature 分支整体交付 → 再决定如何合并到主分支。
+
+```text
+main
+ └── feature/add-auth                          ← 外部需求
+      ├── feature/add-auth/middleware           ← 子任务
+      │    ├── feature/add-auth/middleware/jwt     ← 继续拆
+      │    └── feature/add-auth/middleware/session
+      └── feature/add-auth/tests
+
+回溯合并：jwt → middleware → add-auth → (验证) → main
+```
+
+### 并行轨道与分支树的关系
+
+并行轨道是**执行资源**，不限定任务层级。每条轨道在任意时刻执行的是分支树上的一个**叶节点**（最底层未完成的子分支），或一个**子节点已全部合并、准备做本层整合工作的 feature 节点**。轨道上不会出现"还没拆分完的大 feature"。
+
+关于分支管理、并行轨道和合并流程的详细操作，参考 `{{ shared_dir }}/guide-git-management.md`。
+
+### 每个 feature 的大小控制
+
+每个最终要动手实现的 feature（分支树的叶节点）应该是"一次可以完整交付并测试的最小有意义变更"。
 
 **迭代闭环**：分析需求 → 实现 → 多角度验证 → 交付。不允许跳过验证直接交付。
 
@@ -74,7 +103,7 @@
 graph TD
     RA[需求分析 A] --> RC[需求共识]
     RB[需求分析 B] --> RC
-    RC --> DEV[开发实现]
+    RC -->|通过| DEV[开发实现]
     DEV --> CR1[审查-结构]
     DEV --> CR2[审查-一致性]
     DEV --> CR3[审查-规范]
@@ -83,9 +112,9 @@ graph TD
     CR2 --> CRC
     CR3 --> CRC
     CR4 --> CRC
-    CRC --> TEST[测试开发]
-    CRC --> SA1[安全分析 A]
-    CRC --> SA2[安全分析 B]
+    CRC -->|通过| TEST[测试开发]
+    CRC -->|通过| SA1[安全分析 A]
+    CRC -->|通过| SA2[安全分析 B]
     TEST --> TR1[测试审查 A]
     TEST --> TR2[测试审查 B]
     SA1 --> SAC[安全方案合并与实施]
@@ -93,7 +122,85 @@ graph TD
     TR1 --> VC[验证共识]
     TR2 --> VC
     SAC --> VC
-    VC --> SHIP[交付 / 衍生修复]
+    VC -->|通过| SHIP[交付]
+
+    %% 需求共识发现矛盾 → fail 上报或衍生需求澄清
+    RC -.->|发现矛盾| RCFIX[需求澄清/拆分]
+    RCFIX -.-> RA2[重新需求分析 A]
+    RCFIX -.-> RB2[重新需求分析 B]
+    RA2 -.-> RC2[重新需求共识]
+    RB2 -.-> RC2
+    RC2 -.->|通过| DEV
+    RC2 -.->|不可调和| RCFAIL[FAIL: 上报需求矛盾]
+
+    style RCFIX fill:#f96
+    style RA2 fill:#fca
+    style RB2 fill:#fca
+    style RC2 fill:#fca
+    style RCFAIL fill:#f33,color:#fff
+
+    %% 审查发现问题 → 衍生修复 → 全量重新审查
+    CRC -.->|发现问题| FIX[修复：审查问题]
+    FIX -.-> CR1R[重新审查-结构]
+    FIX -.-> CR2R[重新审查-一致性]
+    FIX -.-> CR3R[重新审查-规范]
+    FIX -.-> CR4R[重新审查-风险]
+    CR1R -.-> CRCR[重新审查共识]
+    CR2R -.-> CRCR
+    CR3R -.-> CRCR
+    CR4R -.-> CRCR
+    CRCR -.->|通过| TEST
+    CRCR -.->|再次发现问题| FIX2[修复：第二轮问题]
+
+    %% 测试审查发现问题（假测试/无效断言/遗漏场景）→ 重写测试 → 全量重新审查
+    VC -.->|测试问题| TFIX[重写测试]
+    TFIX -.-> TFIX_TEST[重新测试开发]
+    TFIX_TEST -.-> TR1R[重新测试审查 A]
+    TFIX_TEST -.-> TR2R[重新测试审查 B]
+    TR1R -.-> VCR[重新验证共识]
+    TR2R -.-> VCR
+    VCR -.->|通过| SHIP
+    VCR -.->|再次发现问题| TFIX2[修复：第二轮测试问题]
+
+    %% 安全分析发现严重问题 → 需要修改代码 → 回到开发+全量重新审查
+    VC -.->|安全问题需改代码| SFIX[修复：安全缺陷]
+    SFIX -.-> CR1S[重新审查-结构]
+    SFIX -.-> CR2S[重新审查-一致性]
+    SFIX -.-> CR3S[重新审查-规范]
+    SFIX -.-> CR4S[重新审查-风险]
+    CR1S -.-> CRCS[重新审查共识]
+    CR2S -.-> CRCS
+    CR3S -.-> CRCS
+    CR4S -.-> CRCS
+    CRCS -.->|通过| TEST
+
+    style FIX fill:#f96
+    style FIX2 fill:#f96
+    style TFIX fill:#f96
+    style TFIX2 fill:#f96
+    style TFIX_TEST fill:#fca
+    style SFIX fill:#f96
+    style CR1S fill:#fca
+    style CR2S fill:#fca
+    style CR3S fill:#fca
+    style CR4S fill:#fca
+    style CRCS fill:#fca
+    style CR1R fill:#fca
+    style CR2R fill:#fca
+    style CR3R fill:#fca
+    style CR4R fill:#fca
+    style CRCR fill:#fca
+    style TR1R fill:#fca
+    style TR2R fill:#fca
+    style VCR fill:#fca
 ```
+
+**图例**：实线=正常流程，虚线+橙色节点=审查发现问题后衍生的重构路径。
+
+**关键规则**：
+- 任何环节（需求分析、代码审查、测试审查、安全分析）发现问题后，**不回到原节点**（节点只执行一次）。衍生"修复"节点，修复完成后进入**全量重新验证**（独立多次，和首次同等规格）。
+- 重新验证如果又发现问题，继续衍生修复节点——递归直到通过。
+- 安全分析发现需要改代码时，修复后要回到代码审查阶段重新走完整流程（因为改了代码）。
+- 需求分析阶段发现不可调和的矛盾时，直接 fail 并上报，不衍生修复。
 
 这不是固定模板——根据实际情况调整。修复 typo 不需要完整的审查和安全分析流程。**复杂度应该与变更的风险成正比。**

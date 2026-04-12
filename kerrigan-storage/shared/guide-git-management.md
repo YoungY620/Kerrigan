@@ -1,14 +1,14 @@
-# Git 并行开发管理指南
+# Git Parallel Development Management Guide
 
-当多个开发节点并行修改同一个 repo 时，需要隔离策略来避免冲突。
+When multiple development nodes modify the same repo in parallel, an isolation strategy is needed to avoid conflicts.
 
-关于 feature 如何拆分为递归的子任务树、拆分标准和回溯合并流程，参考 `{{ shared_dir }}/guide-software-development.md`。
+For how features are broken down into recursive subtask trees, the breakdown criteria, and the backtracking merge process, refer to `{{ shared_dir }}/guide-software-development.md`.
 
 ---
 
-## 隔离策略：并行轨道
+## Isolation Strategy: Parallel Tracks
 
-避免使用 git worktree（状态复杂、容易出错）。采用**独立克隆**策略——提供 N 条等价的并行轨道：
+Avoid using git worktree (complex state, error-prone). Use an **independent clone** strategy — providing N equivalent parallel tracks:
 
 ```text
 workspace/
@@ -20,50 +20,50 @@ workspace/
     └── repo/
 ```
 
-每个轨道是一个独立的 repo clone，彼此等价。需要几条并行就创建几个。轨道是长期复用的：feature 完成合并后，拉取最新 main 即可接下一个 feature。
+Each track is an independent repo clone, equivalent to one another. Create as many as needed for parallel work. Tracks are reused long-term: after a feature is merged, pull the latest main and proceed to the next feature.
 
-orchestrator 在分配开发节点时，在节点 description 中指定使用哪条轨道（如"在 track-2 上开发"），确保同一时刻每条轨道上只有一个任务在进行。
+When the orchestrator assigns development nodes, it specifies which track to use in the node description (e.g., "develop on track-2"), ensuring only one task is running on each track at any given time.
 
-轨道上执行的必须是分支树的**叶节点**（最底层未完成的子分支），或**子节点已全部合并、准备做本层整合的 feature 节点**。不允许在轨道上执行还没拆分完的大 feature。
-
----
-
-## 分支管理
-
-- **分支命名**：`feature/<短描述>`
-- **控制与主分支的距离**：每完成一个小步骤就考虑是否可以合并，或至少拉取主分支的最新更改。关键是 diff 的大小和偏离程度，而非时间
-- **及时合并**：验证通过后立即合并。如果 feature 太大无法快速合并，说明应该拆分
+What runs on a track must be a **leaf node** of the branch tree (the lowest-level incomplete sub-branch), or a **feature node whose child nodes have all been merged and is ready for integration at its level**. Running a large feature that has not been fully broken down on a track is not allowed.
 
 ---
 
-## 合并流程
+## Branch Management
+
+- **Branch naming**: `feature/<short-description>`
+- **Control distance from the main branch**: After completing each small step, consider whether it can be merged, or at least pull the latest changes from the main branch. The key factor is the size and divergence of the diff, not time
+- **Merge promptly**: Merge immediately after verification passes. If a feature is too large to merge quickly, it should be broken down further
+
+---
+
+## Merge Process
 
 ```text
-[feature 开发完成]
-  → [在 feature branch 上跑 CI/测试]
-  → [合并审查]（独立多个：从其他并行分支视角、从各依赖模块视角、从整体架构视角审视合并影响）
-  → [审查一致通过 → 直接合并到主分支]
-  → [删除 feature branch]
-  → [其他并行 feature rebase 到最新主分支]
+[Feature development complete]
+  → [Run CI/tests on the feature branch]
+  → [Merge review] (multiple independent reviews: from other parallel branches' perspective, from each dependent module's perspective, from the overall architecture perspective to assess merge impact)
+  → [Reviews unanimously pass → merge directly to main branch]
+  → [Delete feature branch]
+  → [Other parallel features rebase onto latest main branch]
 ```
 
-每次有 feature 合并到主分支后，其他正在进行的 feature 都应该 rebase，尽早暴露冲突。
+After each feature is merged into the main branch, all other in-progress features should rebase to surface conflicts early.
 
 ---
 
-## 冲突处理
+## Conflict Resolution
 
-- 先合并的 feature 优先
-- 后合并的需要 rebase 并解决冲突，然后重新跑测试
-- 如果冲突难以解决，说明任务分解有问题——存在未识别的隐含依赖。应该回退变更，重新审视 DAG 拓扑：建立依赖改串行、重划 feature 边界、甚至重构子 DAG
+- First-merged feature takes priority
+- Later-merged features need to rebase and resolve conflicts, then re-run tests
+- If conflicts are difficult to resolve, it indicates a problem with task decomposition — there are unidentified implicit dependencies. Changes should be reverted, and the DAG topology should be re-examined: establish dependencies to serialize, redraw feature boundaries, or even restructure the sub-DAG
 
 ---
 
-## 与 DAG 的配合
+## Coordination with the DAG
 
-规划并行开发节点时：
-- 文件集合**完全不重叠** → 独立克隆，安全并行
-- **部分重叠但修改量小** → 同一 clone 不同分支，合并时处理冲突
-- **大量重叠** → 串行执行更安全，或重新划分 feature 边界
+When planning parallel development nodes:
+- File sets **do not overlap at all** → Independent clones, safe to parallelize
+- **Partial overlap with small modifications** → Different branches in the same clone, handle conflicts at merge time
+- **Significant overlap** → Sequential execution is safer, or redraw feature boundaries
 
-orchestrator 在分解任务时应分析文件修改范围，据此选择隔离策略。
+The orchestrator should analyze the scope of file modifications when decomposing tasks, and select the isolation strategy accordingly.

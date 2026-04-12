@@ -131,7 +131,7 @@ mod tests {
         assert!(result.contains("origin-node-123"));
         assert!(result.contains(SKILLS_PATH));
         assert!(result.contains(GUIDE_PATH));
-        assert!(result.contains("研究"));
+        assert!(result.contains("Research"));
     }
 
     #[test]

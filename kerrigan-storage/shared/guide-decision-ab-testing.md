@@ -1,88 +1,88 @@
-# 方案决策与 AB 测试指南
+# Decision-Making and AB Testing Guide
 
-当面临多个方案选择时，不应该通过讨论来决定——应该通过**实验**来验证。
+When facing multiple options, decisions should not be made through discussion — they should be validated through **experiments**.
 
-适用场景：技术选型、架构决策、算法/策略选择、配置调优。
+Applicable scenarios: Technology selection, architecture decisions, algorithm/strategy selection, configuration tuning.
 
-在调研过程中涉及的产品对比和定量实验，同样需要遵循本指南的实验设计要求。调研流程详见 `{{ shared_dir }}/guide-research.md`。
+Product comparisons and quantitative experiments conducted during research must also follow the experimental design requirements in this guide. For the research process, see `{{ shared_dir }}/guide-research.md`.
 
 ---
 
-## 决策流程
+## Decision Process
 
 ```text
-[明确决策问题] → [定义候选方案] → [设计实验]
-  → [独立实施 A 组]（并行）
-  → [独立实施 B 组]（并行）
-  → [收集数据]
-  → [独立分析 1]（并行）
-  → [独立分析 2]（并行）
-  → [交叉审核：对比两个独立分析的结论]
-  → [形成决策报告]
+[Define the decision problem] → [Define candidate solutions] → [Design experiment]
+  → [Independently implement Group A] (parallel)
+  → [Independently implement Group B] (parallel)
+  → [Collect data]
+  → [Independent Analysis 1] (parallel)
+  → [Independent Analysis 2] (parallel)
+  → [Cross-review: Compare conclusions from the two independent analyses]
+  → [Produce decision report]
 ```
 
-关键：**实施和分析都要有独立多次的交叉验证。** 不能让同一个 agent 既做实验又分析结果。
+Key point: **Both implementation and analysis must have multiple independent rounds of cross-validation.** The same agent must not both conduct the experiment and analyze the results.
 
 ---
 
-## 实验设计要求
+## Experiment Design Requirements
 
-- **明确假设**：用可证伪的形式（"方案 A 的 P99 延迟低于方案 B"，而非"方案 A 更好"）
-- **控制变量**：除被测变量外，其他条件必须一致
-- **样本量**：随机性测试需要足够的重复次数以达到统计显著性
-- **评估指标**：
-  - 主要指标：直接衡量决策目标
-  - 辅助指标：需要关注但不作为决策依据
-  - 护栏指标：不能变差的底线
+- **Clear hypothesis**: In a falsifiable form ("Solution A's P99 latency is lower than Solution B's", not "Solution A is better")
+- **Controlled variables**: All conditions except the tested variable must be identical
+- **Sample size**: Randomized tests require sufficient repetitions to achieve statistical significance
+- **Evaluation metrics**:
+  - Primary metrics: Directly measure the decision objective
+  - Secondary metrics: Worth monitoring but not used as decision criteria
+  - Guardrail metrics: Baselines that must not deteriorate
 
 ---
 
-## AB 测试报告模板
+## AB Testing Report Template
 
 ```text
-## 决策问题
-[一句话描述]
+## Decision Problem
+[One-sentence description]
 
-## 候选方案
-- 方案 A：[描述]
-- 方案 B：[描述]
+## Candidate Solutions
+- Solution A: [Description]
+- Solution B: [Description]
 
-## 假设
-[可证伪的假设陈述]
+## Hypothesis
+[Falsifiable hypothesis statement]
 
-## 实验设计
-- 环境：[硬件/软件/数据集]
-- 控制变量：[列举]
-- 变量：[被测差异]
-- 重复次数：[N]
+## Experiment Design
+- Environment: [Hardware/Software/Dataset]
+- Controlled variables: [List]
+- Variable: [Tested difference]
+- Number of repetitions: [N]
 
-## 原始数据
-[表格或数据附件]
+## Raw Data
+[Table or data attachment]
 
-## 统计分析
-- 主要指标对比：[A vs B，含置信区间]
-- 辅助指标对比：
-- 护栏指标检查：
+## Statistical Analysis
+- Primary metric comparison: [A vs B, with confidence intervals]
+- Secondary metric comparison:
+- Guardrail metric check:
 
-## 交叉审核结果
-- 独立分析 1 结论：[...]
-- 独立分析 2 结论：[...]
-- 一致性：[一致 / 分歧及原因]
+## Cross-review Results
+- Independent Analysis 1 conclusion: [...]
+- Independent Analysis 2 conclusion: [...]
+- Consistency: [Consistent / Discrepancy and reasons]
 
-## 结论
-[基于数据的决策建议，明确置信度]
+## Conclusion
+[Data-driven decision recommendation with explicit confidence level]
 
-## 局限性
-[未覆盖的场景、可能影响结论的因素]
+## Limitations
+[Uncovered scenarios, factors that may affect conclusions]
 ```
 
 ---
 
-## 不合格的决策
+## Unqualified Decisions
 
-以下情况应该打回重做：
-- 没有实验数据，仅凭"理论上应该更好"做决策
-- A/B 组的环境不一致
-- 只看了主要指标，忽略了护栏指标的恶化
-- 只有一次分析、没有交叉审核
-- 结论中使用模糊措辞（"可能"、"应该"）而非数据支撑的判断
+The following situations should be sent back for redo:
+- No experimental data; decision based solely on "it should theoretically be better"
+- Inconsistent environments between A/B groups
+- Only looked at primary metrics, ignoring deterioration in guardrail metrics
+- Only one analysis with no cross-review
+- Conclusions use vague wording ("possibly", "should") instead of data-supported judgments

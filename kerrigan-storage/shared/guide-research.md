@@ -1,69 +1,69 @@
-# 信息收集调研指南
+# Information Gathering and Research Guide
 
-系统性调研的核心：**多源独立收集 → 交叉验证 → 实证检验 → 结构化报告**。
-
----
-
-## 调研流程
-
-### 多角度信息收集（独立多个，并行）
-
-对调查选题进行充分联想，从不同角度切入（不限于以下示例）：
-- 学术视角：论文、survey、benchmark
-- 工业视角：产品、开源项目、技术博客
-- 社区视角：论坛讨论、用户反馈、GitHub issues/stars
-- 商业视角：市场规模、商业模式、盈利能力、竞争格局、融资情况
-- 宏观环境：相关的经济趋势、政策法规、地缘政治因素对技术选型或市场的影响
-- 历史视角：当时的技术背景、行业背景、市场环境是什么？为什么当时做了这个选择？后来发生了什么变化？
-
-每个角度由**独立的节点**执行，互不参照——确保收集到的信息独立，而非一个节点影响另一个节点的判断。
-
-### 交叉验证
-
-多个收集节点的结果汇聚后，进行交叉验证：
-- 不同来源的信息是否一致？
-- 有没有互相矛盾的发现？
-- 矛盾之处是否需要进一步调查？
-
-### 实际体验与实验
-
-**凡是可操作、可交互的（能下载的工具、能找到源码的、能在线体验的），必须进行实际体验和实验。** 不能只依赖文档和他人的评测。
-
-实验报告要求：
-- **可证伪性**：明确说明在什么条件下实验结论会被推翻
-- **可重现性**：记录环境、版本、参数，让他人能重现
-- **定量对比**：使用该领域的关键参数进行量化对比
-
-不同领域的关键参数示例：
-- 数据库：性能（QPS/TPS）、响应时间（P50/P99）、吞吐量、资源占用
-- 社交产品：用户量、日活/月活、社区活跃度、口碑评价
-- API 服务：支持的接口类型、数据准确性、延迟、时效性、SDK 生态、鉴权方式
-- 开发工具：安装复杂度、学习曲线、文档质量、社区支持
-
-使用表格进行多产品横向对比。涉及性能数据时，绘制对比图表。
-
-涉及方案对比和定量实验时，实验设计和报告需遵循 AB 测试规范，详见 `{{ shared_dir }}/guide-decision-ab-testing.md`。
-
-### 涉及代码开发的实验
-
-如果实验中需要编写代码（benchmark 脚本、对比测试），**必须遵循软件开发管理指南**（`{{ shared_dir }}/guide-software-development.md`）。实验代码也需要质量保证。
+The core of systematic research: **Multi-source independent collection → Cross-validation → Empirical verification → Structured report**.
 
 ---
 
-## 调查报告标准
+## Research Process
 
-合格的调查报告必须包含：
+### Multi-perspective Information Collection (Independent and Parallel)
 
-- **调查背景**：为什么要调查、目标和边界
-- **方法论**：用了什么方法收集和验证信息
-- **核心发现**：按主题组织，每个发现标注信息来源
-- **实证数据**：定量数据优先于定性描述。有实验的附实验报告
-- **交叉验证结果**：不同信息源之间的一致性分析
-- **局限性**：未覆盖的范围、可能存在的偏差
-- **结论与建议**：可操作的结论，避免模棱两可
+Brainstorm thoroughly on the research topic, approaching from different angles (not limited to the following examples):
+- Academic perspective: Papers, surveys, benchmarks
+- Industry perspective: Products, open-source projects, technical blogs
+- Community perspective: Forum discussions, user feedback, GitHub issues/stars
+- Business perspective: Market size, business models, profitability, competitive landscape, funding status
+- Macro environment: Impact of relevant economic trends, policies and regulations, and geopolitical factors on technology choices or markets
+- Historical perspective: What was the technical context, industry context, and market environment at the time? Why was this choice made then? What changed afterwards?
 
-**不合格的调查报告**：
-- 只引用了单一来源
-- 没有区分事实和观点
-- 数据没有时效性标注（什么时候的数据？）
-- 结论无法证伪
+Each perspective is executed by an **independent node**, without referencing each other — ensuring the collected information is independent, rather than one node influencing another node's judgment.
+
+### Cross-validation
+
+After results from multiple collection nodes converge, perform cross-validation:
+- Is the information from different sources consistent?
+- Are there any contradictory findings?
+- Do contradictions require further investigation?
+
+### Hands-on Experience and Experimentation
+
+**Anything that can be operated or interacted with (downloadable tools, available source code, online demos) must be actually tried and tested.** Do not rely solely on documentation and others' evaluations.
+
+Experiment report requirements:
+- **Falsifiability**: Clearly state under what conditions the experimental conclusions would be overturned
+- **Reproducibility**: Record the environment, versions, and parameters so others can reproduce the results
+- **Quantitative comparison**: Use key metrics from the relevant domain for quantitative comparison
+
+Examples of key metrics for different domains:
+- Databases: Performance (QPS/TPS), response time (P50/P99), throughput, resource usage
+- Social products: User count, DAU/MAU, community activity, reputation and reviews
+- API services: Supported interface types, data accuracy, latency, timeliness, SDK ecosystem, authentication methods
+- Development tools: Installation complexity, learning curve, documentation quality, community support
+
+Use tables for horizontal comparison across multiple products. When performance data is involved, create comparison charts.
+
+For scenario comparisons and quantitative experiments, experimental design and reports must follow the AB testing guidelines — see `{{ shared_dir }}/guide-decision-ab-testing.md`.
+
+### Experiments Involving Code Development
+
+If experiments require writing code (benchmark scripts, comparison tests), **the software development management guide must be followed** (`{{ shared_dir }}/guide-software-development.md`). Experimental code also requires quality assurance.
+
+---
+
+## Research Report Standards
+
+A qualified research report must include:
+
+- **Research background**: Why the investigation was conducted, objectives and scope
+- **Methodology**: What methods were used to collect and verify information
+- **Key findings**: Organized by topic, with information sources noted for each finding
+- **Empirical data**: Quantitative data takes priority over qualitative descriptions. Attach experiment reports where applicable
+- **Cross-validation results**: Consistency analysis across different information sources
+- **Limitations**: Areas not covered, potential biases
+- **Conclusions and recommendations**: Actionable conclusions, avoiding ambiguity
+
+**Unqualified research reports**:
+- Cited only a single source
+- Did not distinguish between facts and opinions
+- Data lacks timeliness annotations (when was the data from?)
+- Conclusions are not falsifiable

@@ -5,7 +5,7 @@ You are orchestrating a multi-agent task using the Kerrigan DAG framework.
 ## Your Role
 You are the **main orchestrator**. An origin node has been created for you:
 
-- **{{ origin_node_id }}**: 研究：{{ task_summary }}
+- **{{ origin_node_id }}**: Research: {{ task_summary }}
 
 Your job in this first round is to:
 1. Read the guide file and understand the working principles

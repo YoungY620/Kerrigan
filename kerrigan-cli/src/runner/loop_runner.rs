@@ -63,7 +63,7 @@ pub async fn run_loop(
         let id = engine.add_node(
             &config.task_id,
             kerrigan_storage::NewNode {
-                summary: format!("研究：{}", config.task_summary),
+                summary: format!("Research: {}", config.task_summary),
                 description: config.task_summary.clone(),
             },
             vec![],

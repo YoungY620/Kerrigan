@@ -45,7 +45,7 @@ Output **only** the markdown block to prepend to CHANGELOG.md. No explanation, n
   - `Fixed`: bug fixes, error corrections
   - `Removed`: deleted features, removed files
 - **Merge related commits** into a single entry if they are part of the same logical change (e.g., "add feature X" + "fix typo in feature X" = one "Added" entry).
-- **Extract contributor**: 优先使用 commit author name（如 `(@patrick)`），如果 name 不可用或不明确，使用完整邮箱（如 `(youngyee620@qq.com)`）。
+- **Extract contributor**: 优先使用 commit author name（如 `(@username)`），如果 name 不可用或不明确，使用完整邮箱。
 - **Be concise** — each entry should be one line, describing the user-visible change.
 - **Skip trivial commits** like "update submodule pointer" or merge commits that carry no meaningful change.
 - Only include sections that have entries (don't output empty sections).

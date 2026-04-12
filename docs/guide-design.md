@@ -25,25 +25,47 @@ agent 看到的只有：ready 节点列表（id + summary）+ skills 文档。�
 
 MASS (Google, ICLR 2026) 证明 prompt 质量（84%）比 agent 数量扩展（76%）更有效。指导文件是 Kerrigan 最重要的"prompt"，其质量直接决定系统效果。
 
+> **研究来源**：MASS (Multi-Agent System Search), Google, ICLR 2026。三阶段优化实验（局部 prompt → 拓扑 → 全局 prompt），在 LiveCodeBench 上发现 prompt 优化贡献 84% 的性能提升，而 agent 数量扩展仅贡献 76%。此外该研究发现对代码任务，Executor（执行者）拓扑 +6%，而 Reflect（反思）拓扑反而 -15% 有害。([arxiv](https://arxiv.org/abs/2502.02533)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §3、§6
+
 ### 2.2 详细程度存在最优点
 
 Prompt Specificity 研究 (IJCNLP 2025) 发现详细程度有三段式曲线：上升→平台→过载下降。指导文件不应该面面俱到，应该抓住关键驱动力：**I/O 规格、边界情况处理、分步工作流**。
+
+> **研究来源**：Prompt Specificity 研究 (IJCNLP 2025)。引入 PartialOrderEval 方法，系统测试从最简到最详细的 prompt 对 Pass@1 的影响，发现三段式曲线（上升→平台→过载下降）。识别出三个关键驱动力：明确的输入/输出规格、边界情况处理、分步骤分解。([arxiv](https://arxiv.org/abs/2508.03678)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §7
+>
+> **补充来源**：System Prompt 研究 (2026)。360 种配置（4 模型 × 5 system prompt × 3 策略 × 2 语言）实验，进一步证实增加约束详细程度不是单调提升，效果取决于具体配置。([arxiv](https://arxiv.org/abs/2602.15228)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §7
 
 ### 2.3 结构化产物 > 自由文本
 
 MetaGPT (ICLR 2024) 证明结构化文档（可执行性 3.75）远优于自由对话（2.1）。result_summary 和 failure_reason 应该有明确的结构模板。
 
+> **研究来源**：MetaGPT, ICLR 2024 Oral。核心发现：agent 之间传递结构化文档（PRD、系统设计、任务列表）远优于传递对话消息——可执行性 3.75 vs ChatDev 的 2.1（1-4 分制），每行代码的 token 开销 126.5 vs 248.9，生成代码量 2.24x。SOP 的价值在于强制每阶段产出结构化中间产物，作为下游 agent 的约束，减少幻觉传播。([arxiv](https://arxiv.org/abs/2308.00352)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §2
+
 ### 2.4 失败时再分解 > 预先原子化
 
 ADaPT (NAACL 2024) 证明递归细分（+28%）优于静态预分解。指导文件应该鼓励粗粒度起步，而非一开始就拆到最细。
+
+> **研究来源**：ADaPT (Adaptive Decomposition and Planning with Tools), NAACL 2024。不预先把所有任务分解为原子步骤，让 agent 先尝试，失败了再递归细分，分解粒度应匹配模型能力而非人类直觉。ALFWorld +28.3%，WebShop +27%，TextCraft +33%。([arxiv](https://arxiv.org/abs/2311.05772)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.1
+>
+> **补充来源**：ClassEval 类级别代码研究 (2025) 从反面验证了这一原则——过度流程化对强模型反而有害（GPT-4o-mini -37.8%，DeepSeek-Chat -39.8%）。([arxiv](https://arxiv.org/abs/2511.09794)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.2
 
 ### 2.5 执行反馈 > 讨论
 
 运行时调试研究 (2025) 证明实际执行反馈（63.86%）比多 agent 讨论（57.16%）更有效。指导文件应该强调"先做、根据结果调整"，而非过度规划。
 
+> **研究来源**：运行时调试 vs 多 agent 讨论研究 (2025)。19 个 LLM 在 HumanEval/HumanEval+ 上的系统对比：多 agent 协作 57.16%，运行时调试 63.86%，两者结合 64.82%。结论：对代码正确性，实际执行反馈单独就比多 agent 讨论好。([arxiv](https://arxiv.org/abs/2505.02133)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §3
+>
+> **补充来源**：MASS (ICLR 2026) 的拓扑发现也支持此原则——Executor（执行者）拓扑对代码任务 +6%，而 Debate（辩论）仅微弱正面，Reflect（反思）-15% 有害，Summarize（总结）有害。([arxiv](https://arxiv.org/abs/2502.02533))
+
 ### 2.6 不绑定角色
 
 Kerrigan 的核心设计是"事决定人"——没有固定的 Tester/Developer 等角色。指导文件面向的是**任意 agent 执行任意节点**的场景，不应该预设角色分工。
+
+> **研究来源**：Drop the Hierarchy and Roles (2026)。25,000 任务实验证明：最小结构 + 角色自主优于严格层级 14%。Agent 从 8 个实例中自发产生了 5,006 个不同角色——远超预设角色的覆盖。强模型应固定顺序、让 agent 自选角色；弱模型才需同时固定结构和角色。([arxiv](https://arxiv.org/abs/2603.28990)) → 详见 [survey-related-work.md](survey-related-work.md) §3、[survey-task-decomposition.md](survey-task-decomposition.md) §8
+>
+> **补充来源**：DyLAN (COLM 2024)。动态选择参与的 agent（不是所有 agent 都参与每个任务），+13%。([arxiv](https://arxiv.org/abs/2310.02170)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §8
+>
+> **补充来源**：Kerrigan 的"事决定人"哲学在 [design.md](design.md) 中有详细论述——agent 的分工完全可以根据事的演化动态变化，不需要绑定到稳定的组织结构中。
 
 ---
 
@@ -58,6 +80,10 @@ Kerrigan 的核心设计是"事决定人"——没有固定的 Tester/Developer 
 ### 3.2 渐进式披露
 
 指导文件不是一个大文件，而是一个**索引 + 子文档**的结构。agent 不需要一次性读完所有指导——根据当前任务类型，只读取相关的子文档。
+
+> **设计依据**：此设计直接源自 §2.2 的"详细程度存在最优点"原则。Prompt Specificity 研究 (IJCNLP 2025) 证明信息过载会导致性能下降，因此采用索引+按需加载，而非一次性注入全部指导。([arxiv](https://arxiv.org/abs/2508.03678))
+>
+> **补充来源**：DAAO (2025) 的难度感知路由思想也支持此设计——简单查询走简单 workflow，复杂查询走复杂 workflow。渐进式披露本质上是让 agent 根据任务类型自适应加载指导深度。([arxiv](https://arxiv.org/abs/2509.11079)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.4
 
 ```text
 ~/.kerrigan/shared/
@@ -92,6 +118,12 @@ Kerrigan 的核心设计是"事决定人"——没有固定的 Tester/Developer 
 
 所有节点的输入和输出都应该遵循结构化模板。具体字段参考 MetaGPT 的结构化文档设计（PRD→系统设计→任务列表→代码→测试），但适配 Kerrigan 的 DAG 节点粒度。
 
+> **研究来源**：MetaGPT (ICLR 2024 Oral)。SOP 的核心价值在于强制每阶段产出结构化中间产物，作为下游 agent 的约束，减少幻觉传播。可执行性 3.75 vs 自由对话 2.1。([arxiv](https://arxiv.org/abs/2308.00352)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §2
+>
+> **结果即通信**：Kerrigan 的 result_summary 机制在本质上与 Blackboard Architecture (2025) 一致——agent 通过读写共享工作区的结构化产物协调，不直接消息传递，+13%-57%。但 Kerrigan 使用结构化 DAG 节点而非非结构化黑板。([arxiv](https://arxiv.org/abs/2510.01285)) → 详见 [survey-related-work.md](survey-related-work.md) §3
+>
+> **补充来源**：Pressure Fields 压力场协调 (2026) 形式化证明了 stigmergy（趋化性）协调的有效性：agent 只通过观察共享制品的状态变化来协调，零直接消息传递，30x 优于层级控制，4x 优于基于对话的方法。([arxiv](https://arxiv.org/abs/2601.08129)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+
 **每个节点的 description 必须包含**：
 - 目标：这个节点要产出什么
 - 上下文：引用哪些前驱节点的结果（node ID）
@@ -110,6 +142,10 @@ Kerrigan 的核心设计是"事决定人"——没有固定的 Tester/Developer 
 - 已尝试的方法（做了什么、走到哪一步）
 - 建议修复方向（增加什么节点、补充什么信息）
 
+> **failure_reason 驱动新节点的设计依据**：ADaPT (NAACL 2024) 的"失败再分解"机制——失败信息结构化后成为下游修复节点的输入。([arxiv](https://arxiv.org/abs/2311.05772))
+>
+> **补充来源**：VMAO (2026) 的动态 replan 机制与此一致——发现 gap 后动态添加新子问题节点，Completeness 3.1→4.2。([arxiv](https://arxiv.org/abs/2603.11445)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+
 ### 4.2 先做后分解
 
 **核心：执行和调研大于讨论，失败或遇到问题再分解大于预先分解。**
@@ -122,6 +158,17 @@ Kerrigan 的核心设计是"事决定人"——没有固定的 Tester/Developer 
 
 依据：ADaPT (NAACL 2024) 失败再分解 +28%，SOEN-101 (ICSE 2025) 迭代 sprint +15%，ClassEval 研究证明过度流程化对强模型反而有害 -37.8%。
 
+> **研究来源汇总（§4.2 先做后分解）**：
+> - **ADaPT** (NAACL 2024)：失败时递归细分，ALFWorld +28.3%，WebShop +27%，TextCraft +33%。([arxiv](https://arxiv.org/abs/2311.05772)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.1
+> - **SOEN-101/FlowGen** (ICSE 2025)：Scrum 迭代模式比 Waterfall/TDD 平均 +15%，标准差仅 1.3%（最稳定）。([arxiv](https://arxiv.org/abs/2403.15852)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.1
+> - **ClassEval 类级别代码研究** (2025)：流程模型有效性是模型依赖的，GPT-4o-mini -37.8%，DeepSeek-Chat -39.8%，Claude-3.5-Haiku +9.5%。([arxiv](https://arxiv.org/abs/2511.09794)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.2
+> - **Flash-Searcher** (2025)：将任务编译为 DAG，中间发现信息不足时动态向 DAG 添加新节点，执行步骤 -35%，时间 -65%。([arxiv](https://arxiv.org/abs/2509.25301)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+> - **VMAO** (2026)：DAG→并行执行→验证→发现 gap 后动态 replan，与 Kerrigan 的 ready→execute→validate→add nodes 循环几乎一致。([arxiv](https://arxiv.org/abs/2603.11445)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+>
+> **"不要在没有调查和实践的前提下进行过多的原子化分解"的依据**：
+> - **Know the Ropes** (2025)：领域先验编码为分解蓝图（而非让 LLM 自己发现），Knapsack 3%→95%。但这意味着分解必须基于实践验证的结构，而非凭空猜测。([arxiv](https://arxiv.org/abs/2505.16979)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.3
+> - **ACONIC** (2025)：用形式化的复杂度度量（treewidth）决定在哪里切分任务，Claude +8.8pp。([arxiv](https://arxiv.org/abs/2510.07772)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.2
+
 ### 4.3 任务有类别，但不绑定角色
 
 Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Tester/Developer agent。但每个任务节点仍然有自己的**类别**（分析、实现、测试、调研等）。
@@ -132,6 +179,10 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 - 审查类节点：告诉 subagent "你是一个独立审查员，目标是找出问题..."
 
 这不是固定角色分配，而是**临时身份描述**——同一个 agent 在不同节点中扮演不同身份。
+
+> **研究来源**：同 §2.6。Drop the Hierarchy (2026) 证明强模型让 agent 自选角色 +44%。([arxiv](https://arxiv.org/abs/2603.28990))
+>
+> **补充来源**：TDAG (2024, Neural Networks 2025)——按需生成专用 agent（包括 prompt、tools），用完销毁。与 Kerrigan 的"agent 没有生命周期，context 才有"吻合。([arxiv](https://arxiv.org/abs/2402.10178)) → 详见 [survey-related-work.md](survey-related-work.md) §2
 
 ### 4.4 透明披露原则
 
@@ -148,6 +199,11 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 - 如果做了妥协（如用了不够优雅的方案）→ 写明妥协原因和更好方案的方向
 - 如果有 TODO / FIXME → 在 result_summary 中体现，不要只留在代码注释里
 
+> **设计依据**：透明披露原则虽然没有直接对应的单篇论文，但其逻辑根基来自多个研究：
+> - **MetaGPT** (ICLR 2024)：结构化产物减少幻觉传播——透明披露已知限制是防止幻觉向下游传播的关键机制。([arxiv](https://arxiv.org/abs/2308.00352))
+> - **AgentPrune** (ICLR 2025)：28.1%-72.8% 的 agent 间通信 token 是冗余的。透明披露确保传递的是高信号量信息（已知问题），而非冗余重复。([arxiv](https://arxiv.org/abs/2410.02506)) → 详见 [survey-related-work.md](survey-related-work.md) §3
+> - **ChatDev 经验共学** (2024)：co-tracking（追踪历史）→ co-memorizing → co-reasoning 机制，质量 +71%。透明披露的已知限制是经验积累的关键输入。([arxiv](https://arxiv.org/abs/2312.17025)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §2
+
 ### 4.5 交叉验证原则
 
 **不单独相信任何一个任务的结果，一定要有多角度的交叉验证。**
@@ -159,6 +215,12 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 - 决策：AB 测试的交叉审核
 
 在 DAG 层面，交叉验证表现为：多个**独立的**节点对同一问题做出判断，然后由一个聚合节点比对结论。如果结论一致，可信度高；如果不一致，衍生进一步调查节点。
+
+> **研究来源**：
+> - **VMAO** (2026)：复杂问题→子问题 DAG→并行执行→LLM 验证→发现 gap 后动态 replan。独立验证节点是其核心机制。([arxiv](https://arxiv.org/abs/2603.11445)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+> - **Multi-Agent Debate** (ICML 2024)：多个 LLM 实例对同一问题独立辩论，在 GSM8K、MMLU 上提升准确率。([github](https://github.com/composable-models/llm_multiagent_debate)) → 详见 [multi-agent-eval-benchmarks.md](multi-agent-eval-benchmarks.md) §2.4
+> - **MapCoder** (ACL 2024)：4 个独立角色（recall, plan, code, debug）从不同角度处理同一任务，HumanEval 93.9%。([github](https://github.com/Md-Ashraful-Pramanik/MapCoder)) → 详见 [multi-agent-eval-benchmarks.md](multi-agent-eval-benchmarks.md) §1.3
+> - **When Should We Orchestrate Multiple Agents?** (2025)：形式化证明多智能体编排仅在 agent 之间存在性能或成本差异时才有效——交叉验证通过引入独立视角创造了这种差异。([arxiv](https://arxiv.org/abs/2503.13577)) → 详见 [survey-related-work.md](survey-related-work.md) §3
 
 ### 4.5 子文档引用
 
@@ -190,6 +252,12 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 
 借鉴 Scrum 模式，但不是完整的 Scrum——重点是**小步迭代**和**多角度质量保证**。
 
+> **研究来源**：SOEN-101/FlowGen (ICSE 2025)。三种软件开发流程对比（Waterfall/TDD/Scrum），FlowGenScrum 平均比单 agent +15%，标准差仅 1.3%（最稳定）。Scrum 赢的原因：迭代 sprint 允许增量改进和早期纠错；Scrum Master 的总结机制创建了所有 agent 可以利用的共享上下文。([arxiv](https://arxiv.org/abs/2403.15852)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.1
+>
+> **注意**：FlowGen 的消融实验发现移除测试环节 Pass@1 下降 17.0%-56.1%——测试是影响最大的活动，这支持了 §5.2 中测试开发和测试审查作为必须子任务的设计。
+>
+> **模型依赖性警告**：ClassEval (2025) 证明流程有效性是模型依赖的。Kerrigan 采用"小步迭代"而非完整 Scrum 流程，正是为了在保持迭代优势的同时避免过度流程化对强模型的负面影响。([arxiv](https://arxiv.org/abs/2511.09794)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.2
+
 **每个 feature 的大小控制**：一个 feature 应该是"一次可以完整交付并测试的最小有意义变更"。如果一个 feature 的 description 超过 500 字还说不清楚，它太大了——应该拆分。
 
 **迭代节奏**：
@@ -201,6 +269,8 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 ### 5.2 必须的子任务类型
 
 每个开发迭代中，以下子任务是**必须的**，且验证类任务要求**多个独立节点从不同角度分别执行**以实现交叉验证：
+
+> **"多个独立节点"设计依据**：AgentCoder (2024) 用 3 个独立角色（programmer, test designer, executor）各自专注不同维度，HumanEval 96.3%。([github](https://github.com/huangd1999/AgentCoder)) → 详见 [multi-agent-eval-benchmarks.md](multi-agent-eval-benchmarks.md) §1.3
 
 #### 需求分析（独立多次）
 
@@ -225,6 +295,8 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 - **风险审查**：从静态分析角度识别潜在的安全漏洞（注入、越权、信息泄露）、可能导致系统崩溃的路径（未处理的异常、资源泄漏、死锁）、明显的性能问题（N+1 查询、不必要的全量遍历、内存爆炸）
 
 关键：审查者不应该知道"开发者认为哪里可能有问题"——审查必须是独立的、无偏见的。
+
+> **设计依据**：此独立性要求与 Kerrigan 的无通信架构天然吻合。AgentPrune (ICLR 2025) 发现 28.1%-72.8% 的 agent 间通信 token 是冗余的——审查者接收开发者的"提示"正是这种冗余通信的典型案例，反而会引入偏见。([arxiv](https://arxiv.org/abs/2410.02506)) → 详见 [survey-related-work.md](survey-related-work.md) §3
 
 #### 测试开发
 
@@ -257,6 +329,10 @@ Kerrigan 框架层面已经解决了"不绑定角色"——没有固定的 Teste
 - 由单一节点执行实际的代码修改，避免多个节点并行修改同一份代码产生冲突
 
 **通用规则：任何需要修改源码的验证手段**（插入断言、添加日志探针、注入 fuzzing harness、修改配置进行压测等），都遵循同样的两阶段模式——先并行独立提案，再串行合并实施。分析阶段不碰代码，实施阶段单点执行。
+
+> **两阶段模式设计依据**：
+> - **CodeCRDT** (2025)：多 agent 协作写代码，通过乐观写+验证协议处理冲突。但 Kerrigan 选择了更保守的方案——分析阶段不碰代码，避免并行写冲突。([arxiv](https://arxiv.org/abs/2510.18893)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+> - **AgileCoder** (FORGE 2025)：引入动态代码依赖图，让 agent 理解代码库结构后再修改。两阶段模式中的"分析阶段"就是建立这种理解。([arxiv](https://arxiv.org/abs/2406.11912)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.3
 
 ### 5.3 DAG 拓扑模式
 
@@ -298,6 +374,16 @@ graph TD
 
 注意：这不是固定模板——agent 应该根据实际情况调整。对于简单的修改（如修复一个 typo），不需要完整的审查和安全分析流程。**复杂度应该与变更的风险成正比。**
 
+> **DAG 拓扑设计依据**：
+> - **MacNet** (ICLR 2025)：DAG 拓扑实验发现不规则拓扑优于规则拓扑，+7% over AgentVerse，支持 1000+ agent。协作 scaling law 呈 logistic 增长。([arxiv](https://arxiv.org/abs/2406.07155)) → 详见 [survey-related-work.md](survey-related-work.md) §2、[survey-task-decomposition.md](survey-task-decomposition.md) §8
+> - **EvoMAC** (ICLR 2025)：自演化多 agent 协作网络——固定拓扑不如让拓扑自己演化。Website +26.48%，Game +34.78%。([arxiv](https://arxiv.org/abs/2410.16946)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.4
+> - **"复杂度与风险成正比"依据**：DAAO (2025) 难度感知路由——简单查询走简单 workflow，复杂查询走复杂 workflow。成本 -36%，准确率 +2.83-11.21%。([arxiv](https://arxiv.org/abs/2509.11079)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.4
+>
+> **自动 Workflow 优化的潜力**：
+> - **AFlow** (ICLR 2025 Oral)：MCTS 搜索 workflow，GPT-4o-mini 在优化 workflow 后胜过 GPT-4o，仅 4.55% 成本。([arxiv](https://arxiv.org/abs/2410.10762)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §5
+> - **ADAS** (ICLR 2025)：Meta Agent Search 在代码空间中迭代发明 agent 设计，自动发现的 agent 大幅优于人工设计且跨领域迁移。([arxiv](https://arxiv.org/abs/2408.08435)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §5
+> - 结论：§5.3 的 DAG 拓扑模式是一个初始设计，未来可通过自动 workflow 搜索进行优化。
+
 ---
 
 ## 6. 信息收集调研指南（guide-research.md）
@@ -305,6 +391,8 @@ graph TD
 ### 6.1 调研流程
 
 系统性调研的核心是：**多源独立收集 → 交叉验证 → 实证检验 → 结构化报告**。
+
+> **研究来源**：Flash-Searcher (2025)——将 web 搜索任务编译为 DAG，独立子查询并行执行，有依赖的节点等待前置完成。BrowseComp 67.7%，执行步骤 -35%，时间 -65%。调研指南的"多源独立收集→交叉验证"流程与其 DAG 结构高度一致。([arxiv](https://arxiv.org/abs/2509.25301)) → 详见 [survey-related-work.md](survey-related-work.md) §1
 
 #### 6.1.1 多角度信息收集（独立多个，并行）
 
@@ -316,6 +404,8 @@ graph TD
 
 每个角度由**独立的节点**执行，互不参照——确保收集到的信息是独立的，而非一个节点影响另一个节点的判断。
 
+> **独立性设计依据**：AgentPrune (ICLR 2025) 证明大量 agent 间通信是冗余的，剪掉后效果反而更好。独立执行杜绝了节点间的信息污染。([arxiv](https://arxiv.org/abs/2410.02506))
+
 #### 6.1.2 交叉验证
 
 多个收集节点的结果汇聚后，进行交叉验证：
@@ -326,6 +416,8 @@ graph TD
 #### 6.1.3 实际体验与实验
 
 **凡是可操作、可交互的（能下载的工具、能找到源码的、能在线体验的），必须进行实际体验和实验。**不能只依赖文档和他人的评测。
+
+> **设计依据**：同 §2.5"执行反馈 > 讨论"。运行时调试研究 (2025) 证明实际执行反馈（63.86%）> 多 agent 讨论（57.16%）。在调研场景中，"实际体验"就是获取执行反馈的方式。([arxiv](https://arxiv.org/abs/2505.02133))
 
 实验报告要求：
 - **可证伪性**：明确说明在什么条件下实验结论会被推翻
@@ -370,6 +462,11 @@ graph TD
 
 当面临多个方案选择时，不应该通过讨论来决定——应该通过**实验**来验证。讨论是廉价的，实验才有说服力。
 
+> **研究来源**：
+> - **MASS** (ICLR 2026)：Executor 拓扑（实际执行）对代码任务 +6%，而 Debate（讨论/辩论）仅微弱正面。讨论不如执行。([arxiv](https://arxiv.org/abs/2502.02533))
+> - **运行时调试研究** (2025)：实际执行反馈（63.86%）> 多 agent 讨论（57.16%）。方案选择的最佳方式是实际运行并比较结果。([arxiv](https://arxiv.org/abs/2505.02133))
+> - **A.DOT** (2026)：将查询编译为 DAG 执行计划，正确性 +14.8%，完整性 +10.7%——结构化实验比非结构化对话更有效。([arxiv](https://arxiv.org/abs/2603.14229)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+
 适用场景：
 - 技术选型（用框架 A 还是框架 B？）
 - 架构决策（方案 A 性能优先 vs 方案 B 可维护性优先？）
@@ -391,6 +488,8 @@ graph TD
 ```
 
 关键：**实施和分析都要有独立多次的交叉验证。** 不能让同一个 agent 既做实验又分析结果——自己验证自己是最常见的失效模式。
+
+> **设计依据**：When Should We Orchestrate Multiple Agents? (2025)——形式化证明多 agent 编排仅在 agent 间存在性能或成本差异时才有效。让不同 agent 分别做实验和分析，人为创造了独立性差异，这是交叉验证有效的理论基础。([arxiv](https://arxiv.org/abs/2503.13577)) → 详见 [survey-related-work.md](survey-related-work.md) §3
 
 ### 7.3 实验设计要求
 
@@ -462,6 +561,10 @@ Kerrigan 的 DAG 天然支持并行执行。当多个开发节点并行修改同
 
 避免使用 git worktree（状态复杂、容易出错、对 agent 的 git 心智模型要求高）。采用**独立克隆**策略——每个并行 feature 就像在不同主机上开发：
 
+> **设计依据**：此决策是工程实用性选择，但有研究支撑：
+> - **CodeCRDT** (2025)：多 agent 协作写代码通过 CRDT 处理冲突。Kerrigan 选择了更简单的隔离方案——完全独立克隆，从源头避免冲突而非事后合并。([arxiv](https://arxiv.org/abs/2510.18893)) → 详见 [survey-related-work.md](survey-related-work.md) §1
+> - **Pressure Fields** (2026)：stigmergy 协调中，agent 通过观察共享制品状态变化来协调。独立克隆 + DAG 依赖关系实现了类似的效果——agent 通过 git 状态（merge/rebase 结果）而非直接消息来协调。([arxiv](https://arxiv.org/abs/2601.08129))
+
 ```text
 workspace/
 ├── track-1/               # 并行轨道 1
@@ -508,6 +611,11 @@ orchestrator 在分配开发节点时，在节点 description 中指定使用哪
 - 冲突解决后需要重新跑测试
 - 如果冲突难以解决，说明最初的任务分解有问题——这两个 feature 之间存在未识别的隐含依赖。此时应该回退相关变更，重新审视 DAG 拓扑：可能需要建立依赖关系改为串行，也可能需要重新划分 feature 边界，甚至重构整个子 DAG 的分解方案
 
+> **冲突即信号的设计依据**：
+> - **S-DAG** (AAAI 2025)：用 GNN 推断主题间依赖关系构建 DAG。Git 冲突本质上是未被识别的依赖关系——冲突发生时应反向更新 DAG 拓扑。([arxiv](https://arxiv.org/abs/2511.06727)) → 详见 [survey-related-work.md](survey-related-work.md) §2
+> - **AgileCoder** (FORGE 2025)：动态代码依赖图随代码修改实时更新。rebase 后的冲突检测是这种动态依赖分析的自然实现。([arxiv](https://arxiv.org/abs/2406.11912)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §1.3
+> - **DeMAC** (EMNLP 2025)：动态 DAG + Manager-Player 双反馈循环——冲突触发 DAG 重构与 DeMAC 的动态 replan 机制一致。([paper](https://aclanthology.org/2025.findings-emnlp.757/)) → 详见 [survey-related-work.md](survey-related-work.md) §2
+
 ### 8.6 与 DAG 的配合
 
 在 DAG 中规划并行开发节点时：
@@ -516,6 +624,10 @@ orchestrator 在分配开发节点时，在节点 description 中指定使用哪
 - 如果有**大量重叠**——串行执行更安全，或者重新划分 feature 边界减少重叠
 
 orchestrator 在分解任务时应该分析文件修改范围，据此选择隔离策略（独立克隆 / 同 clone 不同分支 / 串行）。
+
+> **文件修改范围分析的设计依据**：
+> - **ReSo** (EMNLP 2025)：DAG 分解 + 协作奖励模型从动态数据库中选择最适合的 agent。orchestrator 的文件范围分析类似于 ReSo 的资源匹配机制。([paper](https://aclanthology.org/2025.emnlp-main.808/)) → 详见 [survey-related-work.md](survey-related-work.md) §2
+> - **ACONIC** (2025)：用形式化的复杂度度量（treewidth）决定在哪里切分任务。文件重叠程度可以作为类似的复杂度信号来决定隔离策略。([arxiv](https://arxiv.org/abs/2510.07772)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §4.2
 
 ---
 
@@ -532,6 +644,12 @@ orchestrator 在分解任务时应该分析文件修改范围，据此选择隔�
 | — | — | 子指南 | 按任务类型提供分解策略 |
 
 **注入方式**：prompt 模板中加一行引用路径，init.md 中强引导"请先阅读指导文件"，continue/resume 中不重复。不把 guide.md 全文注入 prompt（太长），让 agent 按需自行阅读。
+
+> **注入方式的设计依据**：
+> - **Prompt Specificity** (IJCNLP 2025)：信息过载导致性能下降。全文注入 guide.md 会超过最优详细程度，让 agent 按需阅读是避免过载的策略。([arxiv](https://arxiv.org/abs/2508.03678))
+> - **MASS** (ICLR 2026)：prompt 优化（84%）> agent 数量扩展（76%）。模板质量是最重要的杠杆。([arxiv](https://arxiv.org/abs/2502.02533))
+> - **DSPy/GEPA**：遗传-Pareto 进化优化可端到端优化多 agent 管线——提示模板本身是可学习参数，未来可自动优化。([dspy.ai](https://dspy.ai/api/optimizers/GEPA/overview/)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §6
+> - **TextGrad** (2024)：LLM 反馈作为"文本梯度"反向传播优化 prompt，78%→92%。([arxiv](https://arxiv.org/abs/2406.07496)) → 详见 [survey-task-decomposition.md](survey-task-decomposition.md) §6
 
 ---
 

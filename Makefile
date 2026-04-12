@@ -9,10 +9,10 @@ check-storage:
 check-cli:
 	cd kerrigan-cli && make check
 
-# Release: generate changelog via kimi, tag, push
-# Usage: make release VERSION=0.2.0
+# Release: auto-detect version bump from commits, generate changelog, tag, push
+# Usage: make release              (auto version)
+#        make release VERSION=1.0.0 (manual override)
 release:
-	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
 	./scripts/release.sh $(VERSION)
 
 # Clean both crates

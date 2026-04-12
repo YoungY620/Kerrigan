@@ -1,65 +1,123 @@
 #!/usr/bin/env bash
 #
-# Release script: generate changelog via kimi, update CHANGELOG.md, tag, push.
+# Release script: auto-determine next version from commit types,
+# generate changelog via kimi, update CHANGELOG.md, tag, push.
 #
 # Usage:
-#   make release VERSION=0.2.0
+#   make release
 #   # or directly:
-#   ./scripts/release.sh 0.2.0
+#   ./scripts/release.sh
+#
+# Override auto-detected version:
+#   make release VERSION=1.0.0
+#   ./scripts/release.sh 1.0.0
 #
 set -euo pipefail
 
-VERSION="${1:?Usage: $0 <version>}"
-TAG="v${VERSION}"
-DATE="$(date +%Y-%m-%d)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILL_DIR="$PROJECT_DIR/skills/changelog"
 CHANGELOG="$PROJECT_DIR/CHANGELOG.md"
 
 info()  { printf '\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
+warn()  { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 error() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
-
-# ── Checks ──
 
 cd "$PROJECT_DIR"
 
-# Ensure working tree is clean
+# ── Checks ──
+
 if [ -n "$(git status --porcelain)" ]; then
     error "Working tree is dirty. Commit or stash changes first."
 fi
 
-# Ensure tag doesn't already exist
-if git rev-parse "$TAG" &>/dev/null; then
-    error "Tag $TAG already exists."
-fi
-
-# Ensure kimi is available
 if ! command -v kimi &>/dev/null; then
     error "kimi CLI not found in PATH. Required for changelog generation."
 fi
 
-# ── Collect git log ──
+# ── Determine last version ──
 
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
 if [ -n "$LAST_TAG" ]; then
-    info "Generating changelog: $LAST_TAG → $TAG"
+    # Parse last version: strip leading 'v'
+    LAST_VERSION="${LAST_TAG#v}"
+    IFS='.' read -r MAJOR MINOR PATCH <<< "$LAST_VERSION"
+else
+    MAJOR=0
+    MINOR=0
+    PATCH=0
+fi
+
+# ── Collect commits since last tag ──
+
+if [ -n "$LAST_TAG" ]; then
+    COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null)
     GIT_LOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%H|%an|%ae|%ad|%s" --date=short)
 else
-    info "Generating changelog: (all commits) → $TAG"
+    COMMITS=$(git log --pretty=format:"%s" 2>/dev/null)
     GIT_LOG=$(git log --pretty=format:"%H|%an|%ae|%ad|%s" --date=short)
 fi
 
-if [ -z "$GIT_LOG" ]; then
+if [ -z "$COMMITS" ]; then
     error "No commits found since last tag."
+fi
+
+# ── Auto-determine version bump ──
+
+BUMP="patch"  # default
+
+# Check for BREAKING CHANGE (major bump)
+if echo "$COMMITS" | grep -qi "BREAKING CHANGE"; then
+    BUMP="major"
+# Check for release: prefix (minor bump)
+elif echo "$COMMITS" | grep -q "^release:"; then
+    BUMP="minor"
+fi
+
+# Apply bump
+case "$BUMP" in
+    major)
+        MAJOR=$((MAJOR + 1))
+        MINOR=0
+        PATCH=0
+        ;;
+    minor)
+        MINOR=$((MINOR + 1))
+        PATCH=0
+        ;;
+    patch)
+        PATCH=$((PATCH + 1))
+        ;;
+esac
+
+AUTO_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+# Allow manual override
+VERSION="${1:-$AUTO_VERSION}"
+TAG="v${VERSION}"
+DATE="$(date +%Y-%m-%d)"
+
+# Verify tag doesn't exist
+if git rev-parse "$TAG" &>/dev/null; then
+    error "Tag $TAG already exists."
+fi
+
+info "Version bump: $BUMP"
+info "Last version: ${LAST_TAG:-none} → Next: $TAG"
+
+# Show commits that determined the bump
+if [ "$BUMP" = "major" ]; then
+    info "BREAKING CHANGE detected in commits"
+elif [ "$BUMP" = "minor" ]; then
+    info "release: commit detected"
 fi
 
 # ── Call kimi to generate changelog entry ──
 
 PROMPT="Generate a CHANGELOG entry for version ${VERSION} released on ${DATE}.
 
-Here are the commits since the last release:
+Here are the commits since the last release (${LAST_TAG:-initial}):
 
 ${GIT_LOG}"
 
@@ -75,7 +133,6 @@ fi
 info "Updating CHANGELOG.md..."
 
 if [ -f "$CHANGELOG" ]; then
-    # Prepend new entry after the title line
     EXISTING=$(cat "$CHANGELOG")
     cat > "$CHANGELOG" <<EOF
 # Changelog
@@ -108,5 +165,6 @@ git push origin main "$TAG"
 
 echo ""
 info "Released ${TAG} successfully!"
+echo "  Version bump: $BUMP ($LAST_TAG → $TAG)"
 echo "  CHANGELOG.md updated"
 echo "  Tag $TAG pushed — CI will build release binaries"

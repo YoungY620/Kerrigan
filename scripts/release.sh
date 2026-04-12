@@ -134,41 +134,28 @@ elif [ "$BUMP" = "minor" ]; then
     info "release: commit detected"
 fi
 
-# ── Call kimi to generate changelog entry ──
+# ── Call kimi to write CHANGELOG.md ──
 
-PROMPT="Generate a CHANGELOG entry for version ${VERSION} released on ${DATE}.
+PROMPT="Write the CHANGELOG entry for version ${VERSION} released on ${DATE} to CHANGELOG.md.
 
 Here are the commits since the last release (${LAST_TAG:-initial}):
 
-${GIT_LOG}"
+${GIT_LOG}
 
-info "Calling kimi to analyze commits..."
-CHANGELOG_ENTRY=$(kimi --print --yolo --skills-dir "$SKILL_DIR" --prompt "$PROMPT" 2>/dev/null)
+Follow the instructions in the changelog skill to write the file. Do NOT modify existing entries."
 
-if [ -z "$CHANGELOG_ENTRY" ]; then
-    error "kimi returned empty output."
+info "Calling kimi to write CHANGELOG.md..."
+kimi --print --yolo --skills-dir "$SKILL_DIR" --prompt "$PROMPT" >/dev/null 2>&1
+
+if [ ! -f "$CHANGELOG" ]; then
+    error "kimi did not create CHANGELOG.md"
 fi
 
-# ── Update CHANGELOG.md ──
-
-info "Updating CHANGELOG.md..."
-
-if [ -f "$CHANGELOG" ]; then
-    EXISTING=$(cat "$CHANGELOG")
-    cat > "$CHANGELOG" <<EOF
-# Changelog
-
-${CHANGELOG_ENTRY}
-
-$(echo "$EXISTING" | tail -n +3)
-EOF
-else
-    cat > "$CHANGELOG" <<EOF
-# Changelog
-
-${CHANGELOG_ENTRY}
-EOF
+if ! grep -q "\[${VERSION}\]" "$CHANGELOG"; then
+    error "CHANGELOG.md does not contain version ${VERSION}"
 fi
+
+info "CHANGELOG.md updated by kimi"
 
 # ── Sync Cargo.toml versions ──
 
@@ -184,9 +171,7 @@ sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" kerrigan-cli/Cargo.tom
 
 info "Committing release..."
 git add CHANGELOG.md kerrigan-storage/Cargo.toml kerrigan-cli/Cargo.toml kerrigan-storage/Cargo.lock kerrigan-cli/Cargo.lock
-git commit -m "release: ${TAG}
-
-$(echo "$CHANGELOG_ENTRY" | head -20)"
+git commit -m "release: ${TAG}"
 
 info "Tagging ${TAG}..."
 git tag -a "$TAG" -m "Release ${TAG}"

@@ -15,6 +15,10 @@ check-cli:
 release:
 	./scripts/release.sh $(VERSION)
 
+# Check CI status on GitHub (run after push)
+ci:
+	./scripts/check-ci.sh
+
 # Clean both crates
 clean:
 	cd kerrigan-storage && make clean

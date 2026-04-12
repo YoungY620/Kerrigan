@@ -8,13 +8,9 @@ All state lives under `~/.kerrigan/`. Each task has its own DAG file (`dag.json`
 
 Nodes communicate results through `result_summary` — downstream nodes read predecessor summaries to get context, eliminating the need for inter-agent messaging.
 
+On `init`, deploys skill docs and guide files to `~/.kerrigan/skills/` and `~/.kerrigan/shared/`.
+
 All CLI commands output JSON for machine consumption.
-
-## Installation
-
-```bash
-curl -fsSL https://github.com/YoungY620/harness/kerrigan-storage/-/raw/main/install.sh | bash
-```
 
 ## Commands
 

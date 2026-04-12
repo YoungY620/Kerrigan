@@ -13,14 +13,9 @@ cache:
     - .cargo/git
     - target/
 
-.clone_storage: &clone_storage
-  - git clone --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@github.com/YoungY620/harness/kerrigan-storage.git ../kerrigan-storage
-
 check:
   stage: check
   image: rust:latest
-  before_script:
-    - *clone_storage
   script:
     - make check
 
@@ -43,8 +38,6 @@ build:linux-x86_64:
   variables:
     RUST_TARGET: x86_64-unknown-linux-gnu
     PLATFORM: linux-x86_64
-  before_script:
-    - *clone_storage
 
 build:linux-aarch64:
   <<: *build_template
@@ -53,7 +46,6 @@ build:linux-aarch64:
     RUST_TARGET: aarch64-unknown-linux-gnu
     PLATFORM: linux-aarch64
   before_script:
-    - *clone_storage
     - apt-get update && apt-get install -y gcc-aarch64-linux-gnu
     - export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 
@@ -64,8 +56,6 @@ build:macos-x86_64:
   variables:
     RUST_TARGET: x86_64-apple-darwin
     PLATFORM: macos-x86_64
-  before_script:
-    - *clone_storage
 
 build:macos-aarch64:
   <<: *build_template
@@ -74,8 +64,6 @@ build:macos-aarch64:
   variables:
     RUST_TARGET: aarch64-apple-darwin
     PLATFORM: macos-aarch64
-  before_script:
-    - *clone_storage
 
 release:
   stage: release

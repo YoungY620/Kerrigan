@@ -111,6 +111,19 @@ if git rev-parse "$TAG" &>/dev/null; then
     error "Tag $TAG already exists."
 fi
 
+# Verify version is strictly monotonically increasing
+if [ -n "$LAST_TAG" ]; then
+    LAST_V="${LAST_TAG#v}"
+    IFS='.' read -r LM LN LP <<< "$LAST_V"
+    IFS='.' read -r NM NN NP <<< "$VERSION"
+    # Compare: new must be strictly greater than last
+    LAST_NUM=$((LM * 1000000 + LN * 1000 + LP))
+    NEW_NUM=$((NM * 1000000 + NN * 1000 + NP))
+    if [ "$NEW_NUM" -le "$LAST_NUM" ]; then
+        error "Version $VERSION is not strictly greater than $LAST_V"
+    fi
+fi
+
 info "Version bump: $BUMP"
 info "Last version: ${LAST_TAG:-none} → Next: $TAG"
 
@@ -157,10 +170,20 @@ ${CHANGELOG_ENTRY}
 EOF
 fi
 
+# ── Sync Cargo.toml versions ──
+
+info "Updating Cargo.toml versions to ${VERSION}..."
+sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" kerrigan-storage/Cargo.toml
+sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" kerrigan-cli/Cargo.toml
+
+# Regenerate Cargo.lock with new version
+(cd kerrigan-storage && cargo check --quiet 2>/dev/null)
+(cd kerrigan-cli && cargo check --quiet 2>/dev/null)
+
 # ── Commit, tag, push ──
 
 info "Committing release..."
-git add CHANGELOG.md
+git add CHANGELOG.md kerrigan-storage/Cargo.toml kerrigan-cli/Cargo.toml kerrigan-storage/Cargo.lock kerrigan-cli/Cargo.lock
 git commit -m "release: ${TAG}
 
 $(echo "$CHANGELOG_ENTRY" | head -20)"

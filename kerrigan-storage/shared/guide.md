@@ -39,7 +39,9 @@ After receiving a ready node, follow this workflow:
 - If the description exceeds 500 words and still isn't clear -> it should be further decomposed
 - If it can be done with a single command -> the granularity may be too fine; consider merging
 
-### Minimize Dependencies
+### Dependencies = Information Requirements
+
+A node's predecessors are exactly the nodes whose outputs it needs to execute. No more, no less — extra dependencies add noise and block parallelism; missing dependencies cause the node to fail from insufficient context.
 
 Parallelize wherever possible. Only establish an A->B dependency when B genuinely requires A's output to begin.
 

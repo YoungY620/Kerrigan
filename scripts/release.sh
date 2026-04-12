@@ -65,6 +65,14 @@ fi
 
 # ── Auto-determine version bump ──
 
+# Check if there are any releasable commits (feat, fix, release, BREAKING CHANGE)
+HAS_RELEASABLE=$(echo "$COMMITS" | grep -cE "^(feat|fix|release|BREAKING CHANGE):" || true)
+
+if [ "$HAS_RELEASABLE" -eq 0 ] && [ -z "${1:-}" ]; then
+    info "No releasable commits since $LAST_TAG (only docs/chore/ci/refactor/test). Skipping release."
+    exit 0
+fi
+
 BUMP="patch"  # default
 
 # Check for BREAKING CHANGE (major bump)

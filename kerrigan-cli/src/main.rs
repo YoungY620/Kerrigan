@@ -8,6 +8,7 @@ use adapter::create_adapter;
 use clap::Parser;
 use kerrigan_storage::StorageEngine;
 use runner::RunConfig;
+use tracing::{debug, info, warn};
 
 #[derive(Parser)]
 #[command(
@@ -39,7 +40,29 @@ enum Command {
         /// Max continue turns before rotating session
         #[arg(long, default_value = "10", help = "Rotate session after N turns")]
         max_turns: usize,
+
+        /// Verbosity: -v for info, -vv for debug (includes agent output streaming)
+        #[arg(short, long, action = clap::ArgAction::Count)]
+        verbose: u8,
     },
+}
+
+fn init_tracing(verbose: u8) {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = match verbose {
+        0 => "kerrigan=warn",
+        1 => "kerrigan=info",
+        _ => "kerrigan=debug",
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)),
+        )
+        .with_target(false)
+        .without_time()
+        .init();
 }
 
 #[tokio::main]
@@ -59,7 +82,10 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
             adapter: adapter_name,
             skills_dir,
             max_turns,
+            verbose,
         } => {
+            init_tracing(verbose);
+
             let engine = StorageEngine::default_root().map_err(error::CliError::Storage)?;
 
             let adapter = create_adapter(&adapter_name)
@@ -86,17 +112,18 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 shared_dir: Some(engine.shared_dir()),
                 max_turns_per_session: max_turns,
                 max_fix_attempts: 3,
+                verbose,
             };
 
-            println!("Starting task: {} ({})", task_entry.summary, task_id);
-            println!("Adapter: {}", adapter.name());
+            info!(task = %task_entry.summary, id = %task_id, "Starting task");
+            info!(adapter = %adapter.name(), "Using adapter");
 
             let result = runner::run_loop(&engine, adapter.as_ref(), &config).await?;
 
-            println!(
-                "Task complete. {} rounds, {} sessions used.",
-                result.rounds,
-                result.sessions_used.len()
+            info!(
+                rounds = result.rounds,
+                sessions = result.sessions_used.len(),
+                "Task complete"
             );
         }
     }

@@ -22,6 +22,8 @@ pub struct RunConfig {
     pub max_turns_per_session: usize,
     /// Max fix attempts per round (default: 3)
     pub max_fix_attempts: usize,
+    /// Verbosity level (0=quiet, 1=info, 2=debug with agent output)
+    pub verbose: u8,
 }
 
 impl Default for RunConfig {
@@ -34,6 +36,7 @@ impl Default for RunConfig {
             shared_dir: None,
             max_turns_per_session: 10,
             max_fix_attempts: 3,
+            verbose: 0,
         }
     }
 }

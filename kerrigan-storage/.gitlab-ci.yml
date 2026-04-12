@@ -1,0 +1,92 @@
+stages:
+  - check
+  - build
+  - release
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .cargo/registry
+    - .cargo/git
+    - target/
+
+check:
+  stage: check
+  image: rust:latest
+  script:
+    - make check
+
+.build_template: &build_template
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  script:
+    - rustup target add $RUST_TARGET
+    - cargo build --release --target $RUST_TARGET
+    - mkdir -p artifacts
+    - cp target/$RUST_TARGET/release/kerrigan-storage artifacts/kerrigan-storage-$PLATFORM
+  artifacts:
+    paths:
+      - artifacts/
+
+build:linux-x86_64:
+  <<: *build_template
+  image: rust:latest
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-gnu
+    PLATFORM: linux-x86_64
+
+build:linux-aarch64:
+  <<: *build_template
+  image: rust:latest
+  variables:
+    RUST_TARGET: aarch64-unknown-linux-gnu
+    PLATFORM: linux-aarch64
+  before_script:
+    - apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+    - export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+
+build:macos-x86_64:
+  <<: *build_template
+  tags:
+    - macos
+  variables:
+    RUST_TARGET: x86_64-apple-darwin
+    PLATFORM: macos-x86_64
+
+build:macos-aarch64:
+  <<: *build_template
+  tags:
+    - macos
+  variables:
+    RUST_TARGET: aarch64-apple-darwin
+    PLATFORM: macos-aarch64
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  needs:
+    - build:linux-x86_64
+    - build:linux-aarch64
+    - build:macos-x86_64
+    - build:macos-aarch64
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Release $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: kerrigan-storage-linux-x86_64
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/artifacts/kerrigan-storage-linux-x86_64"
+        - name: kerrigan-storage-linux-aarch64
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/artifacts/kerrigan-storage-linux-aarch64"
+        - name: kerrigan-storage-macos-x86_64
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/artifacts/kerrigan-storage-macos-x86_64"
+        - name: kerrigan-storage-macos-aarch64
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/artifacts/kerrigan-storage-macos-aarch64"

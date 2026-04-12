@@ -31,6 +31,14 @@
 - 不添加 `Co-Authored-By`、`Signed-off-by` 或任何 AI 署名
 - 不修改 git author 或 committer 配置
 
+## 主分支保护
+
+**main 分支上的每个 commit 都必须是立即可用的完整版本。** 不允许存在实现了一半的功能、编译不通过、测试不过的 commit。
+
+- 如果一个功能需要分步实现，必须在专门的开发分支上完成所有步骤后，再合并到 main
+- 合并前确保 `make check` 在 kerrigan-storage 和 kerrigan-cli 上都通过
+- 不允许向 main 直接 push 半成品——宁可多开一个分支，也不要让 main 处于不可用状态
+
 ### 示例
 
 ```

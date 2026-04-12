@@ -1,6 +1,7 @@
 pub mod claude;
 pub mod kimi;
 pub mod session;
+pub mod stream;
 pub mod traits;
 
 pub use claude::ClaudeAdapter;

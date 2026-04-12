@@ -1,3 +1,4 @@
+use super::stream::exec_streaming;
 use super::traits::{AgentAdapter, AgentOutput};
 use crate::error::CliError;
 use std::path::Path;
@@ -53,20 +54,10 @@ impl AgentAdapter for KimiAdapter {
         session_id: &str,
         skills_dir: Option<&Path>,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, CliError> {
-        let output = self
-            .build_run_command(prompt, session_id, skills_dir, workdir)
-            .output()
-            .await
-            .map_err(|e| CliError::AgentExec {
-                adapter: "kimi".into(),
-                source: e,
-            })?;
-
-        Ok(AgentOutput {
-            text: String::from_utf8_lossy(&output.stdout).into_owned(),
-            exit_code: output.status.code().unwrap_or(-1),
-        })
+        let cmd = self.build_run_command(prompt, session_id, skills_dir, workdir);
+        exec_streaming(cmd, "kimi", log_path).await
     }
 
     async fn resume(
@@ -74,20 +65,10 @@ impl AgentAdapter for KimiAdapter {
         session_id: &str,
         prompt: &str,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, CliError> {
-        let output = self
-            .build_resume_command(session_id, prompt, workdir)
-            .output()
-            .await
-            .map_err(|e| CliError::AgentExec {
-                adapter: "kimi".into(),
-                source: e,
-            })?;
-
-        Ok(AgentOutput {
-            text: String::from_utf8_lossy(&output.stdout).into_owned(),
-            exit_code: output.status.code().unwrap_or(-1),
-        })
+        let cmd = self.build_resume_command(session_id, prompt, workdir);
+        exec_streaming(cmd, "kimi", log_path).await
     }
 
     fn name(&self) -> &str {

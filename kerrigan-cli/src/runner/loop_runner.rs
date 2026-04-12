@@ -5,6 +5,8 @@ use crate::runner::board::BoardWatcher;
 use crate::runner::templates;
 use crate::runner::validate;
 use kerrigan_storage::StorageEngine;
+use std::path::PathBuf;
+use tracing::{debug, info, warn};
 
 /// Configuration for the main loop.
 pub struct RunConfig {
@@ -138,15 +140,22 @@ pub async fn run_loop(
             prompt
         };
 
+        // Prepare log path
+        let logs_dir = engine.task_dir(&config.task_id).join("logs");
+        let log_path = logs_dir.join(format!("round-{round:03}-{session_id}.log"));
+        let log_ref = Some(log_path.as_path());
+
+        info!(round, ready_count = ready.len(), "Starting round");
+
         // Call agent
         let skills_dir = config.skills_dir.as_deref();
         let _output: AgentOutput = if is_first_round || turns_in_session == 0 {
             adapter
-                .run(&prompt, &session_id, skills_dir, &config.workdir)
+                .run(&prompt, &session_id, skills_dir, &config.workdir, log_ref)
                 .await?
         } else {
             adapter
-                .resume(&session_id, &prompt, &config.workdir)
+                .resume(&session_id, &prompt, &config.workdir, log_ref)
                 .await?
         };
 
@@ -163,17 +172,30 @@ pub async fn run_loop(
 
             fix_attempts += 1;
             if fix_attempts > config.max_fix_attempts {
-                eprintln!(
-                    "Warning: DAG still has {} issues after {} fix attempts, proceeding anyway",
-                    issues.len(),
-                    config.max_fix_attempts
+                warn!(
+                    issues = issues.len(),
+                    attempts = config.max_fix_attempts,
+                    "DAG still has issues after max fix attempts, proceeding anyway"
                 );
                 break;
             }
 
+            info!(
+                attempt = fix_attempts,
+                issues = issues.len(),
+                "Fixing DAG issues"
+            );
             let fix_prompt = templates::render_fix(&issues);
+            let fix_log = logs_dir.join(format!(
+                "round-{round:03}-fix-{fix_attempts}-{session_id}.log"
+            ));
             adapter
-                .resume(&session_id, &fix_prompt, &config.workdir)
+                .resume(
+                    &session_id,
+                    &fix_prompt,
+                    &config.workdir,
+                    Some(fix_log.as_path()),
+                )
                 .await?;
             turns_in_session += 1;
         }

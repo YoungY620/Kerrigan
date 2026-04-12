@@ -21,12 +21,14 @@ pub trait AgentAdapter: Send + Sync {
     /// - `session_id`: Session identifier for the agent CLI
     /// - `skills_dir`: Optional path to a skills directory to inject
     /// - `workdir`: Working directory for the agent process
+    /// - `log_path`: Optional path to write agent output log
     async fn run(
         &self,
         prompt: &str,
         session_id: &str,
         skills_dir: Option<&Path>,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, crate::error::CliError>;
 
     /// Resume an existing session with a new prompt.
@@ -34,11 +36,13 @@ pub trait AgentAdapter: Send + Sync {
     /// - `session_id`: The session to resume
     /// - `prompt`: The prompt to send on resume
     /// - `workdir`: Working directory for the agent process
+    /// - `log_path`: Optional path to write agent output log
     async fn resume(
         &self,
         session_id: &str,
         prompt: &str,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, crate::error::CliError>;
 
     /// Return the adapter name (e.g. "claude", "kimi").

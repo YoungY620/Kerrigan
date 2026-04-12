@@ -1,3 +1,4 @@
+use super::stream::exec_streaming;
 use super::traits::{AgentAdapter, AgentOutput};
 use crate::error::CliError;
 use std::path::Path;
@@ -6,13 +7,6 @@ use tokio::process::Command;
 /// Claude Code adapter.
 ///
 /// Invokes `claude` CLI in non-interactive YOLO mode with `--print`.
-///
-/// Key flags verified against `claude --help`:
-/// - `--print`: non-interactive output mode
-/// - `--dangerously-skip-permissions`: YOLO mode
-/// - `--session-id <uuid>`: specify session (must be valid UUID)
-/// - `--resume <session-id>`: resume a session by ID
-/// - `--add-dir <path>`: add directory to workspace scope (used for skills)
 #[derive(Default)]
 pub struct ClaudeAdapter;
 
@@ -33,12 +27,10 @@ impl ClaudeAdapter {
         cmd.args(["--print", "--dangerously-skip-permissions"]);
         cmd.args(["--session-id", session_id]);
 
-        // Claude Code doesn't have --skill-dir; use --add-dir to expose skills directory
         if let Some(dir) = skills_dir {
             cmd.args(["--add-dir", &dir.to_string_lossy()]);
         }
 
-        // Use -p flag for prompt to avoid positional arg ambiguity with --add-dir
         cmd.args(["-p", prompt]);
         cmd
     }
@@ -61,20 +53,10 @@ impl AgentAdapter for ClaudeAdapter {
         session_id: &str,
         skills_dir: Option<&Path>,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, CliError> {
-        let output = self
-            .build_run_command(prompt, session_id, skills_dir, workdir)
-            .output()
-            .await
-            .map_err(|e| CliError::AgentExec {
-                adapter: "claude".into(),
-                source: e,
-            })?;
-
-        Ok(AgentOutput {
-            text: String::from_utf8_lossy(&output.stdout).into_owned(),
-            exit_code: output.status.code().unwrap_or(-1),
-        })
+        let cmd = self.build_run_command(prompt, session_id, skills_dir, workdir);
+        exec_streaming(cmd, "claude", log_path).await
     }
 
     async fn resume(
@@ -82,20 +64,10 @@ impl AgentAdapter for ClaudeAdapter {
         session_id: &str,
         prompt: &str,
         workdir: &Path,
+        log_path: Option<&Path>,
     ) -> Result<AgentOutput, CliError> {
-        let output = self
-            .build_resume_command(session_id, prompt, workdir)
-            .output()
-            .await
-            .map_err(|e| CliError::AgentExec {
-                adapter: "claude".into(),
-                source: e,
-            })?;
-
-        Ok(AgentOutput {
-            text: String::from_utf8_lossy(&output.stdout).into_owned(),
-            exit_code: output.status.code().unwrap_or(-1),
-        })
+        let cmd = self.build_resume_command(session_id, prompt, workdir);
+        exec_streaming(cmd, "claude", log_path).await
     }
 
     fn name(&self) -> &str {
@@ -124,7 +96,7 @@ mod tests {
         assert!(args.contains(&"--dangerously-skip-permissions"));
         assert!(args.contains(&"--session-id"));
         assert!(args.contains(&"550e8400-e29b-41d4-a716-446655440000"));
-        assert!(args.contains(&"--add-dir")); // not --skill-dir
+        assert!(args.contains(&"--add-dir"));
         assert!(args.contains(&"/tmp/skills"));
         assert!(args.contains(&"-p"));
         assert!(args.contains(&"hello world"));
@@ -156,6 +128,6 @@ mod tests {
         assert!(args.contains(&"-p"));
         assert!(args.contains(&"continue please"));
         assert!(args.contains(&"--dangerously-skip-permissions"));
-        assert!(!args.contains(&"--session-id")); // resume uses --resume <id>, not --session-id
+        assert!(!args.contains(&"--session-id"));
     }
 }

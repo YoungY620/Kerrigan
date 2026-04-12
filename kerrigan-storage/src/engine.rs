@@ -1,47 +1,46 @@
+use crate::db;
 use crate::error::{Result, StorageError};
 use crate::model::*;
-use crate::persist;
-use std::collections::{HashSet, VecDeque};
+use rusqlite::{Connection, params};
 use std::fs;
 use std::path::PathBuf;
 
 pub struct StorageEngine {
     root: PathBuf,
+    conn: Connection,
 }
 
 impl StorageEngine {
     /// Create a new engine pointing at the given root directory.
-    /// Typically `~/.kerrigan/`.
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
+        let root = root.into();
+        // Ensure root directory exists so SQLite can create the db file
+        fs::create_dir_all(&root).map_err(|e| StorageError::io(&root, e))?;
+        let db_path = root.join("kerrigan.db");
+        let conn = db::open(&db_path)?;
+        Ok(Self { root, conn })
     }
 
     /// Default root: `~/.kerrigan/`.
     pub fn default_root() -> Result<Self> {
         let home = std::env::var("HOME").map_err(|_| StorageError::NotInitialized)?;
-        Ok(Self::new(PathBuf::from(home).join(".kerrigan")))
+        Self::new(PathBuf::from(home).join(".kerrigan"))
     }
 
     // ── Paths ──
-
-    fn registry_path(&self) -> PathBuf {
-        self.root.join("registry.json")
-    }
-
-    fn lock_path(&self) -> PathBuf {
-        self.root.join("lock")
-    }
 
     pub fn task_dir(&self, task_id: &str) -> PathBuf {
         self.root.join("tasks").join(task_id)
     }
 
-    fn dag_path(&self, task_id: &str) -> PathBuf {
-        self.task_dir(task_id).join("dag.json")
+    /// Path to the skills directory: `~/.kerrigan/skills/`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.root.join("skills")
     }
 
-    fn config_path(&self, task_id: &str) -> PathBuf {
-        self.task_dir(task_id).join("config.json")
+    /// Path to the shared directory: `~/.kerrigan/shared/`.
+    pub fn shared_dir(&self) -> PathBuf {
+        self.root.join("shared")
     }
 
     // ── Init ──
@@ -57,14 +56,9 @@ impl StorageEngine {
     const GUIDE_GIT_MANAGEMENT_MD: &str = include_str!("../shared/guide-git-management.md");
 
     /// Initialize `~/.kerrigan/` directory structure. Idempotent.
-    /// Deploys skills and guide files.
+    /// Creates database, deploys skills and guide files.
     pub fn init(&self) -> Result<()> {
         fs::create_dir_all(self.root.join("tasks")).map_err(|e| StorageError::io(&self.root, e))?;
-
-        let reg_path = self.registry_path();
-        if !reg_path.exists() {
-            persist::atomic_write(&reg_path, &Registry::default())?;
-        }
 
         // Deploy bundled skill
         let skill_dir = self.skills_dir().join("kerrigan-storage");
@@ -95,57 +89,48 @@ impl StorageEngine {
         Ok(())
     }
 
-    /// Path to the skills directory: `~/.kerrigan/skills/`.
-    pub fn skills_dir(&self) -> PathBuf {
-        self.root.join("skills")
-    }
-
-    /// Path to the shared directory: `~/.kerrigan/shared/`.
-    pub fn shared_dir(&self) -> PathBuf {
-        self.root.join("shared")
-    }
-
     // ── Task management ──
 
     /// Create a new task, returning its id.
     pub fn task_create(&self, summary: &str, workdir: &str) -> Result<TaskId> {
-        self.ensure_initialized()?;
-        let _lock = persist::lock_exclusive(&self.lock_path())?;
-
         let task_id = uuid::Uuid::new_v4().to_string();
+        let created_at = now_iso();
+
+        self.conn
+            .execute(
+                "INSERT INTO tasks (id, summary, workdir, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![task_id, summary, workdir, created_at],
+            )
+            .map_err(|e| StorageError::Db(format!("task_create: {e}")))?;
+
+        // Create task directory for board.md (still file-based for human editing)
         let dir = self.task_dir(&task_id);
         fs::create_dir_all(&dir).map_err(|e| StorageError::io(&dir, e))?;
-
-        // Create initial files
-        persist::atomic_write(&self.dag_path(&task_id), &Dag::default())?;
-        persist::atomic_write(
-            &self.config_path(&task_id),
-            &TaskConfig {
-                workdir: workdir.to_string(),
-            },
-        )?;
-        persist::atomic_write(&dir.join("sessions.json"), &serde_json::json!([]))?;
-        fs::write(dir.join("board.md"), "").map_err(|e| StorageError::io(&dir, e))?;
-
-        // Register
-        let mut registry: Registry = persist::read_json(&self.registry_path())?;
-        registry.tasks.push(TaskEntry {
-            id: task_id.clone(),
-            summary: summary.to_string(),
-            workdir: workdir.to_string(),
-            created_at: now_iso(),
-        });
-        persist::atomic_write(&self.registry_path(), &registry)?;
 
         Ok(task_id)
     }
 
     /// List all registered tasks.
     pub fn task_list(&self) -> Result<Vec<TaskEntry>> {
-        self.ensure_initialized()?;
-        let _lock = persist::lock_exclusive(&self.lock_path())?;
-        let registry: Registry = persist::read_json(&self.registry_path())?;
-        Ok(registry.tasks)
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, summary, workdir, created_at FROM tasks ORDER BY created_at")
+            .map_err(|e| StorageError::Db(format!("task_list: {e}")))?;
+
+        let tasks = stmt
+            .query_map([], |row| {
+                Ok(TaskEntry {
+                    id: row.get(0)?,
+                    summary: row.get(1)?,
+                    workdir: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            })
+            .map_err(|e| StorageError::Db(format!("task_list: {e}")))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| StorageError::Db(format!("task_list: {e}")))?;
+
+        Ok(tasks)
     }
 
     // ── DAG operations ──
@@ -158,191 +143,447 @@ impl StorageEngine {
         depends_on: Vec<NodeId>,
     ) -> Result<NodeId> {
         self.ensure_task_exists(task_id)?;
-        let dag_path = self.dag_path(task_id);
-        let mut dag: Dag = persist::read_json(&dag_path)?;
-
         let node_id = uuid::Uuid::new_v4().to_string();
+
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| StorageError::Db(format!("add_node tx: {e}")))?;
 
         // Validate dependencies exist
         for dep_id in &depends_on {
-            if !dag.nodes.contains_key(dep_id) {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?1 AND task_id = ?2)",
+                    params![dep_id, task_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| StorageError::Db(format!("add_node validate: {e}")))?;
+            if !exists {
                 return Err(StorageError::NodeNotFound(dep_id.clone()));
             }
         }
 
         // Determine initial status
-        let all_predecessors_done = depends_on.iter().all(|dep_id| {
-            dag.nodes
-                .get(dep_id)
-                .is_some_and(|n| n.status == NodeStatus::Succeeded)
-        });
-        let status = if depends_on.is_empty() || all_predecessors_done {
-            NodeStatus::Ready
+        let status = if depends_on.is_empty() {
+            "ready"
         } else {
-            NodeStatus::Pending
+            let all_succeeded: bool = {
+                let placeholders: Vec<String> = depends_on
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect();
+                let sql = format!(
+                    "SELECT NOT EXISTS(SELECT 1 FROM nodes WHERE id IN ({}) AND status != 'succeeded')",
+                    placeholders.join(",")
+                );
+                let mut stmt = tx
+                    .prepare(&sql)
+                    .map_err(|e| StorageError::Db(format!("add_node status: {e}")))?;
+                let dep_refs: Vec<&dyn rusqlite::types::ToSql> = depends_on
+                    .iter()
+                    .map(|s| s as &dyn rusqlite::types::ToSql)
+                    .collect();
+                stmt.query_row(dep_refs.as_slice(), |r| r.get(0))
+                    .map_err(|e| StorageError::Db(format!("add_node status: {e}")))?
+            };
+            if all_succeeded { "ready" } else { "pending" }
         };
 
-        let node = Node {
-            id: node_id.clone(),
-            summary: new_node.summary,
-            description: new_node.description,
-            predecessors: depends_on.clone(),
-            successors: Vec::new(),
-            status,
-            metadata: NodeMetadata::default(),
-        };
+        // Insert node
+        tx.execute(
+            "INSERT INTO nodes (id, task_id, summary, description, status) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![node_id, task_id, new_node.summary, new_node.description, status],
+        )
+        .map_err(|e| StorageError::Db(format!("add_node insert: {e}")))?;
 
-        // Check for cycles before inserting
-        if would_create_cycle(&dag, &node_id, &depends_on) {
-            return Err(StorageError::CycleDetected);
-        }
-
-        // Update successors of predecessor nodes
+        // Insert edges
         for dep_id in &depends_on {
-            if let Some(dep_node) = dag.nodes.get_mut(dep_id) {
-                dep_node.successors.push(node_id.clone());
-            }
+            tx.execute(
+                "INSERT INTO node_edges (predecessor_id, successor_id, task_id) VALUES (?1, ?2, ?3)",
+                params![dep_id, node_id, task_id],
+            )
+            .map_err(|e| StorageError::Db(format!("add_node edge: {e}")))?;
         }
 
-        dag.nodes.insert(node_id.clone(), node);
-        persist::atomic_write(&dag_path, &dag)?;
+        tx.commit()
+            .map_err(|e| StorageError::Db(format!("add_node commit: {e}")))?;
+
         Ok(node_id)
     }
 
     /// List all nodes in a task's DAG (lightweight summaries).
     pub fn list_all(&self, task_id: &str) -> Result<Vec<NodeSummary>> {
         self.ensure_task_exists(task_id)?;
-        let dag: Dag = persist::read_json(&self.dag_path(task_id))?;
-        Ok(dag.nodes.values().map(NodeSummary::from).collect())
+        self.query_node_summaries(task_id, None)
     }
 
     /// List all Ready nodes in a task's DAG.
     pub fn list_ready(&self, task_id: &str) -> Result<Vec<NodeSummary>> {
         self.ensure_task_exists(task_id)?;
-        let dag: Dag = persist::read_json(&self.dag_path(task_id))?;
-        Ok(dag
-            .nodes
-            .values()
-            .filter(|n| n.status == NodeStatus::Ready)
-            .map(NodeSummary::from)
-            .collect())
+        self.query_node_summaries(task_id, Some("ready"))
     }
 
     /// Batch update nodes. Handles cascading Ready status.
     pub fn update_nodes(&self, task_id: &str, updates: Vec<NodeUpdate>) -> Result<()> {
         self.ensure_task_exists(task_id)?;
-        let dag_path = self.dag_path(task_id);
-        let mut dag: Dag = persist::read_json(&dag_path)?;
 
-        // Apply updates
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| StorageError::Db(format!("update_nodes tx: {e}")))?;
+
         let mut newly_succeeded = Vec::new();
+
         for update in &updates {
-            let node = dag
-                .nodes
-                .get_mut(&update.id)
-                .ok_or_else(|| StorageError::NodeNotFound(update.id.clone()))?;
+            // Get current status
+            let current_status: String = tx
+                .query_row(
+                    "SELECT status FROM nodes WHERE id = ?1 AND task_id = ?2",
+                    params![update.id, task_id],
+                    |r| r.get(0),
+                )
+                .map_err(|_| StorageError::NodeNotFound(update.id.clone()))?;
 
             if let Some(new_status) = update.status {
-                validate_transition(&node.id, node.status, new_status)?;
+                let from = parse_status(&current_status)?;
+                validate_transition(&update.id, from, new_status)?;
+
                 if new_status == NodeStatus::Succeeded {
-                    newly_succeeded.push(node.id.clone());
+                    newly_succeeded.push(update.id.clone());
                 }
-                node.status = new_status;
+
+                tx.execute(
+                    "UPDATE nodes SET status = ?1 WHERE id = ?2",
+                    params![status_str(new_status), update.id],
+                )
+                .map_err(|e| StorageError::Db(format!("update_nodes status: {e}")))?;
             }
 
             if let Some(ref meta) = update.metadata {
-                node.metadata = meta.clone();
+                tx.execute(
+                    "UPDATE nodes SET result_summary = ?1, failure_reason = ?2 WHERE id = ?3",
+                    params![meta.result_summary, meta.failure_reason, update.id],
+                )
+                .map_err(|e| StorageError::Db(format!("update_nodes meta: {e}")))?;
+
+                // Update session_ids
+                tx.execute(
+                    "DELETE FROM node_sessions WHERE node_id = ?1",
+                    params![update.id],
+                )
+                .map_err(|e| StorageError::Db(format!("update_nodes sessions: {e}")))?;
+                for sid in &meta.session_ids {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO node_sessions (node_id, session_id) VALUES (?1, ?2)",
+                        params![update.id, sid],
+                    )
+                    .map_err(|e| StorageError::Db(format!("update_nodes session: {e}")))?;
+                }
+
+                // Update spawned_tasks
+                tx.execute(
+                    "DELETE FROM spawned_tasks WHERE node_id = ?1",
+                    params![update.id],
+                )
+                .map_err(|e| StorageError::Db(format!("update_nodes spawned: {e}")))?;
+                for st in &meta.spawned_tasks {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO spawned_tasks (node_id, spawned_node_id) VALUES (?1, ?2)",
+                        params![update.id, st],
+                    )
+                    .map_err(|e| StorageError::Db(format!("update_nodes spawned: {e}")))?;
+                }
             }
         }
 
-        // Cascade: check successors of newly succeeded nodes
-        cascade_ready(&mut dag, &newly_succeeded);
+        // Cascade ready
+        if !newly_succeeded.is_empty() {
+            cascade_ready_sql(&tx, task_id, &newly_succeeded)?;
+        }
 
-        persist::atomic_write(&dag_path, &dag)?;
+        tx.commit()
+            .map_err(|e| StorageError::Db(format!("update_nodes commit: {e}")))?;
         Ok(())
     }
 
     /// Get full details of a single node.
     pub fn get_node(&self, task_id: &str, node_id: &str) -> Result<Node> {
         self.ensure_task_exists(task_id)?;
-        let dag: Dag = persist::read_json(&self.dag_path(task_id))?;
-        dag.nodes
-            .get(node_id)
-            .cloned()
-            .ok_or_else(|| StorageError::NodeNotFound(node_id.to_string()))
+
+        let (summary, description, status_str, result_summary, failure_reason): (
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = self
+            .conn
+            .query_row(
+                "SELECT summary, description, status, result_summary, failure_reason FROM nodes WHERE id = ?1 AND task_id = ?2",
+                params![node_id, task_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .map_err(|_| StorageError::NodeNotFound(node_id.to_string()))?;
+
+        let predecessors = self.query_predecessors(node_id)?;
+        let successors = self.query_successors(node_id)?;
+        let session_ids = self.query_session_ids(node_id)?;
+        let spawned_tasks = self.query_spawned_tasks(node_id)?;
+
+        Ok(Node {
+            id: node_id.to_string(),
+            summary,
+            description,
+            predecessors,
+            successors,
+            status: parse_status(&status_str)?,
+            metadata: NodeMetadata {
+                result_summary,
+                failure_reason,
+                spawned_tasks,
+                session_ids,
+            },
+        })
     }
 
-    // ── Helpers ──
+    // ── Board messages ──
 
-    fn ensure_initialized(&self) -> Result<()> {
-        if !self.registry_path().exists() {
-            return Err(StorageError::NotInitialized);
-        }
+    /// Post a message to a task's board.
+    pub fn board_post(&self, task_id: &str, content: &str) -> Result<()> {
+        self.ensure_task_exists(task_id)?;
+        self.conn
+            .execute(
+                "INSERT INTO board_messages (task_id, content, created_at) VALUES (?1, ?2, ?3)",
+                params![task_id, content, now_iso()],
+            )
+            .map_err(|e| StorageError::Db(format!("board_post: {e}")))?;
         Ok(())
     }
 
+    /// Get all unread messages for a task.
+    pub fn board_unread(&self, task_id: &str) -> Result<Vec<BoardMessage>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, content, created_at FROM board_messages WHERE task_id = ?1 AND read = 0 ORDER BY id",
+            )
+            .map_err(|e| StorageError::Db(format!("board_unread: {e}")))?;
+
+        let msgs = stmt
+            .query_map(params![task_id], |row| {
+                Ok(BoardMessage {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })
+            .map_err(|e| StorageError::Db(format!("board_unread: {e}")))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| StorageError::Db(format!("board_unread: {e}")))?;
+
+        Ok(msgs)
+    }
+
+    /// Mark all messages for a task as read.
+    pub fn board_mark_read(&self, task_id: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE board_messages SET read = 1 WHERE task_id = ?1 AND read = 0",
+                params![task_id],
+            )
+            .map_err(|e| StorageError::Db(format!("board_mark_read: {e}")))?;
+        Ok(())
+    }
+
+    // ── Internal helpers ──
+
     fn ensure_task_exists(&self, task_id: &str) -> Result<()> {
-        self.ensure_initialized()?;
-        if !self.dag_path(task_id).exists() {
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                params![task_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| StorageError::Db(format!("ensure_task: {e}")))?;
+        if !exists {
             return Err(StorageError::TaskNotFound(task_id.to_string()));
         }
         Ok(())
     }
-}
 
-/// Check if adding a node with the given predecessors would create a cycle.
-/// Since we're adding a new node (not yet in the graph) that depends on `depends_on`,
-/// a cycle would only occur if any node reachable from the new node's successors
-/// can reach back to one of the predecessors. But since the new node has no successors
-/// yet, it cannot create a cycle. This function is here for future-proofing when
-/// we allow editing dependencies.
-fn would_create_cycle(_dag: &Dag, _new_node_id: &str, _depends_on: &[NodeId]) -> bool {
-    // A brand-new node with no successors cannot create a cycle.
-    // Cycle detection becomes relevant when re-wiring existing edges.
-    false
-}
-
-/// After nodes become Succeeded, check their successors.
-/// If all predecessors of a successor are Succeeded, mark it Ready.
-fn cascade_ready(dag: &mut Dag, newly_succeeded: &[NodeId]) {
-    let mut queue: VecDeque<NodeId> = newly_succeeded.iter().cloned().collect();
-    let mut visited: HashSet<NodeId> = HashSet::new();
-
-    while let Some(node_id) = queue.pop_front() {
-        if !visited.insert(node_id.clone()) {
-            continue;
-        }
-
-        let successor_ids: Vec<NodeId> = dag
-            .nodes
-            .get(&node_id)
-            .map(|n| n.successors.clone())
-            .unwrap_or_default();
-
-        for succ_id in successor_ids {
-            let all_preds_succeeded = {
-                let succ = match dag.nodes.get(&succ_id) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if succ.status != NodeStatus::Pending {
-                    continue;
-                }
-                succ.predecessors.iter().all(|pid| {
-                    dag.nodes
-                        .get(pid)
-                        .is_some_and(|p| p.status == NodeStatus::Succeeded)
-                })
+    fn query_node_summaries(
+        &self,
+        task_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<NodeSummary>> {
+        let (sql, filter_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(status) = status_filter {
+                (
+                    "SELECT id, summary, status FROM nodes WHERE task_id = ?1 AND status = ?2"
+                        .to_string(),
+                    vec![
+                        Box::new(task_id.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                        Box::new(status.to_string()),
+                    ],
+                )
+            } else {
+                (
+                    "SELECT id, summary, status FROM nodes WHERE task_id = ?1".to_string(),
+                    vec![Box::new(task_id.to_string()) as Box<dyn rusqlite::types::ToSql>],
+                )
             };
 
-            if all_preds_succeeded {
-                if let Some(succ) = dag.nodes.get_mut(&succ_id) {
-                    succ.status = NodeStatus::Ready;
-                }
-                // Continue cascading in case this unlocks further nodes
-                queue.push_back(succ_id);
-            }
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|e| StorageError::Db(format!("query_summaries: {e}")))?;
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            filter_params.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                let id: String = row.get(0)?;
+                let summary: String = row.get(1)?;
+                let status_s: String = row.get(2)?;
+                Ok((id, summary, status_s))
+            })
+            .map_err(|e| StorageError::Db(format!("query_summaries: {e}")))?;
+
+        let mut summaries = Vec::new();
+        for row in rows {
+            let (id, summary, status_s) =
+                row.map_err(|e| StorageError::Db(format!("query_summaries row: {e}")))?;
+            let successors = self.query_successors(&id)?;
+            summaries.push(NodeSummary {
+                id,
+                summary,
+                successors,
+                status: parse_status(&status_s)?,
+            });
         }
+        Ok(summaries)
+    }
+
+    fn query_predecessors(&self, node_id: &str) -> Result<Vec<NodeId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT predecessor_id FROM node_edges WHERE successor_id = ?1")
+            .map_err(|e| StorageError::Db(format!("predecessors: {e}")))?;
+        let ids = stmt
+            .query_map(params![node_id], |r| r.get(0))
+            .map_err(|e| StorageError::Db(format!("predecessors: {e}")))?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(|e| StorageError::Db(format!("predecessors: {e}")))?;
+        Ok(ids)
+    }
+
+    fn query_successors(&self, node_id: &str) -> Result<Vec<NodeId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT successor_id FROM node_edges WHERE predecessor_id = ?1")
+            .map_err(|e| StorageError::Db(format!("successors: {e}")))?;
+        let ids = stmt
+            .query_map(params![node_id], |r| r.get(0))
+            .map_err(|e| StorageError::Db(format!("successors: {e}")))?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(|e| StorageError::Db(format!("successors: {e}")))?;
+        Ok(ids)
+    }
+
+    fn query_session_ids(&self, node_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT session_id FROM node_sessions WHERE node_id = ?1")
+            .map_err(|e| StorageError::Db(format!("session_ids: {e}")))?;
+        let ids = stmt
+            .query_map(params![node_id], |r| r.get(0))
+            .map_err(|e| StorageError::Db(format!("session_ids: {e}")))?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(|e| StorageError::Db(format!("session_ids: {e}")))?;
+        Ok(ids)
+    }
+
+    fn query_spawned_tasks(&self, node_id: &str) -> Result<Vec<NodeId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT spawned_node_id FROM spawned_tasks WHERE node_id = ?1")
+            .map_err(|e| StorageError::Db(format!("spawned_tasks: {e}")))?;
+        let ids = stmt
+            .query_map(params![node_id], |r| r.get(0))
+            .map_err(|e| StorageError::Db(format!("spawned_tasks: {e}")))?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(|e| StorageError::Db(format!("spawned_tasks: {e}")))?;
+        Ok(ids)
+    }
+}
+
+// ── Cascade ready via SQL ──
+
+/// After nodes become Succeeded, cascade Ready status to their successors.
+/// Loops until no more nodes can be promoted.
+fn cascade_ready_sql(
+    tx: &rusqlite::Transaction<'_>,
+    task_id: &str,
+    newly_succeeded: &[NodeId],
+) -> Result<()> {
+    // TODO: When multiple external Kerrigan instances access the same db concurrently,
+    // this cascade logic may need additional coordination. Current WAL mode handles
+    // single-writer serialization, but complex multi-swarm scenarios may require
+    // per-swarm isolation or connection pooling.
+
+    loop {
+        let changed = tx
+            .execute(
+                "UPDATE nodes SET status = 'ready'
+                 WHERE status = 'pending'
+                   AND task_id = ?1
+                   AND NOT EXISTS (
+                       SELECT 1 FROM node_edges e
+                       JOIN nodes pred ON pred.id = e.predecessor_id
+                       WHERE e.successor_id = nodes.id
+                         AND pred.status != 'succeeded'
+                   )",
+                params![task_id],
+            )
+            .map_err(|e| StorageError::Db(format!("cascade_ready: {e}")))?;
+
+        if changed == 0 {
+            break;
+        }
+    }
+
+    // Suppress unused variable warning — newly_succeeded is used to trigger the cascade,
+    // but the SQL approach promotes all eligible nodes in the task, not just successors
+    // of the specific nodes.
+    let _ = newly_succeeded;
+
+    Ok(())
+}
+
+// ── Status helpers ──
+
+fn status_str(s: NodeStatus) -> &'static str {
+    match s {
+        NodeStatus::Pending => "pending",
+        NodeStatus::Ready => "ready",
+        NodeStatus::Running => "running",
+        NodeStatus::Succeeded => "succeeded",
+        NodeStatus::Failed => "failed",
+    }
+}
+
+fn parse_status(s: &str) -> Result<NodeStatus> {
+    match s {
+        "pending" => Ok(NodeStatus::Pending),
+        "ready" => Ok(NodeStatus::Ready),
+        "running" => Ok(NodeStatus::Running),
+        "succeeded" => Ok(NodeStatus::Succeeded),
+        "failed" => Ok(NodeStatus::Failed),
+        _ => Err(StorageError::Db(format!("unknown status: {s}"))),
     }
 }
 
@@ -352,7 +593,6 @@ fn validate_transition(node_id: &str, from: NodeStatus, to: NodeStatus) -> Resul
         (NodeStatus::Ready, NodeStatus::Running)
             | (NodeStatus::Running, NodeStatus::Succeeded)
             | (NodeStatus::Running, NodeStatus::Failed)
-            // Allow direct Ready -> Succeeded/Failed for simple tasks
             | (NodeStatus::Ready, NodeStatus::Succeeded)
             | (NodeStatus::Ready, NodeStatus::Failed)
     );
@@ -372,7 +612,5 @@ fn now_iso() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    let secs = duration.as_secs();
-    // Simple ISO-ish format without chrono dependency
-    format!("{secs}")
+    format!("{}", duration.as_secs())
 }

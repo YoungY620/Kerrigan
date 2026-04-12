@@ -1,7 +1,7 @@
+pub mod db;
 pub mod engine;
 pub mod error;
 pub mod model;
-pub mod persist;
 
 // Re-export serde_json for CLI binary
 pub use serde_json;

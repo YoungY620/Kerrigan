@@ -88,6 +88,17 @@ pub enum Command {
         #[arg(long, help = "The node ID to retrieve")]
         node: String,
     },
+
+    /// Send a message to a running task's board
+    Tell {
+        /// Task ID
+        #[arg(long, help = "The task ID to send the message to")]
+        task: String,
+
+        /// Message content
+        #[arg(long, help = "Message to post to the task's board")]
+        message: String,
+    },
 }
 
 #[derive(Subcommand)]

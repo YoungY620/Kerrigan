@@ -35,6 +35,9 @@ pub enum StorageError {
         path: PathBuf,
         source: serde_json::Error,
     },
+
+    #[error("database error: {0}")]
+    Db(String),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;

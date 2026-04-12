@@ -100,3 +100,12 @@ pub struct NodeUpdate {
 pub struct TaskConfig {
     pub workdir: String,
 }
+
+// ── Board messages ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoardMessage {
+    pub id: i64,
+    pub content: String,
+    pub created_at: String,
+}

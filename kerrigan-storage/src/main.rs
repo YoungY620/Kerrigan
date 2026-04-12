@@ -90,6 +90,11 @@ fn run(engine: StorageEngine, command: Command) -> kerrigan_storage::Result<()> 
             let n = engine.get_node(&task, &node)?;
             println!("{}", serde_json::to_string_pretty(&n).unwrap());
         }
+
+        Command::Tell { task, message } => {
+            engine.board_post(&task, &message)?;
+            println!("{{\"ok\": true}}");
+        }
     }
     Ok(())
 }

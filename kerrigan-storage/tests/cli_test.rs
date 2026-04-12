@@ -254,11 +254,12 @@ fn cli_error_invalid_json() {
 }
 
 #[test]
-fn cli_error_not_initialized() {
+fn cli_without_init_returns_empty_list() {
+    // With SQLite, db is auto-created on first access — no "not initialized" error
     let tmp = TempDir::new().unwrap();
     cmd(tmp.path())
         .args(["task", "list"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("not initialized"));
+        .success()
+        .stdout(predicate::str::contains("[]"));
 }

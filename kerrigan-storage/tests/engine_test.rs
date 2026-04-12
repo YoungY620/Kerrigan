@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 fn setup() -> (TempDir, StorageEngine) {
     let tmp = TempDir::new().unwrap();
-    let engine = StorageEngine::new(tmp.path());
+    let engine = StorageEngine::new(tmp.path()).unwrap();
     engine.init().unwrap();
     (tmp, engine)
 }
@@ -99,12 +99,12 @@ fn task_create_does_not_create_per_task_shared() {
 }
 
 #[test]
-fn not_initialized_error() {
+fn empty_db_returns_empty_task_list() {
     let tmp = TempDir::new().unwrap();
-    let engine = StorageEngine::new(tmp.path());
-    // Should fail before init
-    let err = engine.task_list().unwrap_err();
-    assert!(matches!(err, StorageError::NotInitialized));
+    let engine = StorageEngine::new(tmp.path()).unwrap();
+    // No init needed for db operations — db is created on new()
+    let tasks = engine.task_list().unwrap();
+    assert!(tasks.is_empty());
 }
 
 // ── Task management ──
@@ -135,10 +135,10 @@ fn task_directory_structure() {
     let (tmp, engine) = setup();
     let id = engine.task_create("test", "/tmp").unwrap();
     let dir = tmp.path().join("tasks").join(&id);
-    assert!(dir.join("dag.json").exists());
-    assert!(dir.join("config.json").exists());
-    assert!(dir.join("sessions.json").exists());
-    assert!(dir.join("board.md").exists());
+    // Task directory exists (for future file-based needs)
+    assert!(dir.is_dir());
+    // Database file exists
+    assert!(tmp.path().join("kerrigan.db").exists());
     // Global shared/ dir (not per-task) is created by init()
     assert!(tmp.path().join("shared").is_dir());
     assert!(tmp.path().join("shared").join("guide.md").exists());
@@ -721,7 +721,7 @@ fn persistence_roundtrip() {
         .unwrap();
 
     // Create a new engine instance pointing to the same directory
-    let engine2 = StorageEngine::new(tmp.path());
+    let engine2 = StorageEngine::new(tmp.path()).unwrap();
     let node_a = engine2.get_node(&task_id, &a).unwrap();
     assert_eq!(node_a.status, NodeStatus::Succeeded);
     assert_eq!(node_a.metadata.result_summary.as_deref(), Some("result"));
@@ -816,14 +816,14 @@ fn add_node_with_completed_predecessors() {
 fn concurrent_task_create() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
-    let engine = StorageEngine::new(&root);
+    let engine = StorageEngine::new(&root).unwrap();
     engine.init().unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|i| {
             let r = root.clone();
             thread::spawn(move || {
-                let e = StorageEngine::new(&r);
+                let e = StorageEngine::new(&r).unwrap();
                 e.task_create(&format!("task-{i}"), "/tmp").unwrap()
             })
         })
@@ -1449,7 +1449,7 @@ fn persistence_full_dag_state() {
         .unwrap();
 
     // Reload from disk
-    let engine2 = StorageEngine::new(tmp.path());
+    let engine2 = StorageEngine::new(tmp.path()).unwrap();
 
     // Task registry intact
     let tasks = engine2.task_list().unwrap();

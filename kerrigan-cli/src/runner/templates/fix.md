@@ -6,6 +6,6 @@ The following issues were found after your last round. Use the **kerrigan-storag
 - **{{ issue.node_id }}**: {{ issue.description }}
 {% endfor %}
 
-Also check `{{ board_path }}` for unread messages. If non-empty, address them and then clear the file.
+Also check `{{ board_path }}` for unread messages. If non-empty, address them and then clear the file. Ensure your background monitor on this file is still running.
 
 Fix all issues above, then stop. The framework will validate again after you're done.

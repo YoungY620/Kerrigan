@@ -19,6 +19,8 @@ Use the **kerrigan-storage** skill (docs at `{{ skills_path }}`) to:
 ## User Messages
 Check `{{ board_path }}` for unread messages. If the file is non-empty, you have unread messages from the user — read and follow the instructions. Once fully addressed, clear the file (write empty content) to mark them as read.
 
+**Important:** Start a background monitor that watches `{{ board_path }}` for changes so you can react to new user messages immediately, without waiting for the next round.
+
 ## Rules
 - Each node executes **exactly once**. Never retry in place — create new nodes instead.
 - Always write structured `result_summary` / `failure_reason` (see guide for templates).

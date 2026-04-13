@@ -11,3 +11,5 @@ Use the **kerrigan-storage** skill (docs at `{{ skills_path }}`) to read node de
 
 ## User Messages
 Check `{{ board_path }}` for unread messages. If the file is non-empty, you have unread messages from the user — read and follow the instructions. Once fully addressed, clear the file (write empty content) to mark them as read.
+
+**Reminder:** Ensure you have a background monitor watching `{{ board_path }}` for changes so you can react to new user messages immediately.

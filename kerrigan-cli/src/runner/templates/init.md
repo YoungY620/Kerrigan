@@ -19,6 +19,8 @@ The **kerrigan-storage** skill documentation is available at `{{ skills_path }}`
 ## User Messages
 The user may send messages to you during execution via `{{ board_path }}`. **Read this file before you start working.** If it is non-empty, you have unread messages — incorporate the user's instructions into your current work. Once you have fully addressed the messages, clear the file (write empty content) to mark them as read.
 
+**Important:** You must keep a background monitor running throughout your session that watches `{{ board_path }}` for changes. Use `tail -f` or periodic polling so you can react to new user messages as soon as they arrive, without waiting for the next round.
+
 ## Rules
 - Each node executes **exactly once**. Never retry in place — create new nodes instead.
 - Always write structured `result_summary` when marking a node as `succeeded` (see guide for template).

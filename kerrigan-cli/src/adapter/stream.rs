@@ -59,7 +59,7 @@ pub async fn exec_streaming(
             line = stdout_reader.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        debug!(target: "kerrigan::agent", "{}", line);
+                        debug!(target: "kerrigan_cli::agent", "{}", line);
                         text.push_str(&line);
                         text.push('\n');
                         if let Some(ref mut f) = log_file {
@@ -74,7 +74,7 @@ pub async fn exec_streaming(
             line = stderr_reader.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        debug!(target: "kerrigan::agent::stderr", "{}", line);
+                        debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
                         if let Some(ref mut f) = log_file {
                             let _ = f.write_all(b"[stderr] ").await;
                             let _ = f.write_all(line.as_bytes()).await;
@@ -90,7 +90,7 @@ pub async fn exec_streaming(
 
     // Drain any remaining stderr after stdout EOF
     while let Ok(Some(line)) = stderr_reader.next_line().await {
-        debug!(target: "kerrigan::agent::stderr", "{}", line);
+        debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
         if let Some(ref mut f) = log_file {
             let _ = f.write_all(b"[stderr] ").await;
             let _ = f.write_all(line.as_bytes()).await;

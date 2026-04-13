@@ -96,9 +96,9 @@ fn init_tracing(verbose: u8) {
     use tracing_subscriber::EnvFilter;
 
     let filter = match verbose {
-        0 => "kerrigan=warn",
-        1 => "kerrigan=info",
-        _ => "kerrigan=debug",
+        0 => "kerrigan_cli=warn",
+        1 => "kerrigan_cli=info",
+        _ => "kerrigan_cli=debug,kerrigan=debug",
     };
 
     tracing_subscriber::fmt()

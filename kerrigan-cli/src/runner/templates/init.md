@@ -10,7 +10,7 @@ You are the **main orchestrator**. An origin node has been created for you:
 Your job in this first round is to:
 1. Read the guide file and understand the working principles
 2. Thoroughly research and understand this task
-3. Break it down into sub-tasks following the guide's decomposition principles (coarse-grained first, 2-3 high-level nodes — do not over-decompose)
+3. Break it down into sub-tasks following the guide's decomposition principles (limit planning depth to 2 dependency layers, but expand as many parallel nodes as needed — do not over-decompose sequentially)
 4. Use the **kerrigan-storage** skill to add these sub-tasks as new DAG nodes (with appropriate dependencies)
 5. Mark the origin node as `succeeded` with a structured `result_summary` (follow the template in the guide)
 

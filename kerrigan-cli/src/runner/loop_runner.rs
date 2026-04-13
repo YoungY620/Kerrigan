@@ -8,6 +8,9 @@ use kerrigan_storage::StorageEngine;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
+/// Max consecutive rounds with no DAG progress before aborting.
+const MAX_STALL_ROUNDS: usize = 3;
+
 /// Configuration for the main loop.
 pub struct RunConfig {
     /// Task ID to execute
@@ -78,11 +81,71 @@ pub async fn run_loop(
         None
     };
 
+    // Stall detection: track ready node set across rounds.
+    // If the same set persists for MAX_STALL_ROUNDS consecutive rounds,
+    // the agent is not making progress and we abort.
+    let mut stall_count: usize = 0;
+    let mut prev_ready_ids: Vec<String> = Vec::new();
+
     loop {
         // Check termination: no ready nodes
         let ready = engine.list_ready(&config.task_id)?;
         if ready.is_empty() {
+            // Before exiting, check if the user posted new instructions on the board.
+            // If so, create a new ready node from the message and keep running.
+            if let Some(board_content) = board.check_for_changes() {
+                let summary = if board_content.len() > 80 {
+                    format!("User request: {}…", &board_content[..80])
+                } else {
+                    format!("User request: {}", board_content)
+                };
+                let node_id = engine.add_node(
+                    &config.task_id,
+                    kerrigan_storage::NewNode {
+                        summary,
+                        description: board_content,
+                    },
+                    vec![],
+                )?;
+                info!(node_id = %node_id, "Created node from board message");
+                // Reset stall tracking — fresh work from the user
+                stall_count = 0;
+                prev_ready_ids.clear();
+                continue;
+            }
             break;
+        }
+
+        // Stall detection
+        let mut current_ready_ids: Vec<String> =
+            ready.iter().map(|n| n.id.clone()).collect();
+        current_ready_ids.sort();
+
+        if current_ready_ids == prev_ready_ids {
+            stall_count += 1;
+            if stall_count >= MAX_STALL_ROUNDS {
+                warn!(
+                    round,
+                    stall_rounds = stall_count,
+                    "No DAG progress for {stall_count} consecutive rounds, aborting"
+                );
+                return Err(CliError::Stall {
+                    round,
+                    stall_rounds: stall_count,
+                    reason: format!(
+                        "ready nodes unchanged: [{}]",
+                        current_ready_ids.join(", ")
+                    ),
+                });
+            }
+            warn!(
+                round = round + 1,
+                stall_count,
+                "No DAG progress ({stall_count}/{MAX_STALL_ROUNDS})"
+            );
+        } else {
+            stall_count = 0;
+            prev_ready_ids = current_ready_ids;
         }
 
         round += 1;
@@ -114,12 +177,15 @@ pub async fn run_loop(
             .map(|d| d.join("guide.md").to_string_lossy().into_owned())
             .unwrap_or_default();
 
+        // Board file path — the agent can read this for user messages
+        let board_path = task_dir.join("board.md").to_string_lossy().into_owned();
+
         // Build prompt
         let prompt = if let Some(ref origin_id) = origin_node_id
             && round == 1
         {
             // Very first round: init with origin node
-            templates::render_init(&config.task_summary, origin_id, &skills_path, &guide_path)
+            templates::render_init(&config.task_summary, origin_id, &skills_path, &guide_path, &board_path)
         } else if is_first_round {
             // New session (after rotation or restart)
             templates::render_resume(
@@ -128,9 +194,10 @@ pub async fn run_loop(
                 &ready,
                 &skills_path,
                 &guide_path,
+                &board_path,
             )
         } else {
-            templates::render_continue(&config.task_id, round, &ready, &skills_path, &guide_path)
+            templates::render_continue(&config.task_id, round, &ready, &skills_path, &guide_path, &board_path)
         };
 
         // Inject board content if changed
@@ -149,7 +216,7 @@ pub async fn run_loop(
 
         // Call agent
         let skills_dir = config.skills_dir.as_deref();
-        let _output: AgentOutput = if is_first_round || turns_in_session == 0 {
+        let output: AgentOutput = if is_first_round || turns_in_session == 0 {
             adapter
                 .run(&prompt, &session_id, skills_dir, &config.workdir, log_ref)
                 .await?
@@ -158,6 +225,15 @@ pub async fn run_loop(
                 .resume(&session_id, &prompt, &config.workdir, log_ref)
                 .await?
         };
+
+        if output.exit_code != 0 {
+            warn!(
+                exit_code = output.exit_code,
+                round,
+                adapter = adapter.name(),
+                "Agent exited with non-zero code"
+            );
+        }
 
         is_first_round = false;
         turns_in_session += 1;
@@ -185,7 +261,7 @@ pub async fn run_loop(
                 issues = issues.len(),
                 "Fixing DAG issues"
             );
-            let fix_prompt = templates::render_fix(&issues);
+            let fix_prompt = templates::render_fix(&issues, &board_path);
             let fix_log = logs_dir.join(format!(
                 "round-{round:03}-fix-{fix_attempts}-{session_id}.log"
             ));

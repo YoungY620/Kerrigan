@@ -53,48 +53,71 @@ pub async fn exec_streaming(
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
 
-    // Read stdout and stderr concurrently
+    // Read stdout and stderr concurrently.
+    // Track stderr EOF to avoid busy-looping in select! — once stderr
+    // closes, poll only stdout.
+    let mut stderr_done = false;
+
     loop {
-        tokio::select! {
-            line = stdout_reader.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        debug!(target: "kerrigan_cli::agent", "{}", line);
-                        text.push_str(&line);
-                        text.push('\n');
-                        if let Some(ref mut f) = log_file {
-                            let _ = f.write_all(line.as_bytes()).await;
-                            let _ = f.write_all(b"\n").await;
-                        }
+        if stderr_done {
+            // stderr already closed — read stdout directly
+            match stdout_reader.next_line().await {
+                Ok(Some(line)) => {
+                    debug!(target: "kerrigan_cli::agent", "{}", line);
+                    text.push_str(&line);
+                    text.push('\n');
+                    if let Some(ref mut f) = log_file {
+                        let _ = f.write_all(line.as_bytes()).await;
+                        let _ = f.write_all(b"\n").await;
                     }
-                    Ok(None) => break, // EOF
-                    Err(_) => break,
                 }
+                Ok(None) => break,
+                Err(_) => break,
             }
-            line = stderr_reader.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
-                        if let Some(ref mut f) = log_file {
-                            let _ = f.write_all(b"[stderr] ").await;
-                            let _ = f.write_all(line.as_bytes()).await;
-                            let _ = f.write_all(b"\n").await;
+        } else {
+            tokio::select! {
+                line = stdout_reader.next_line() => {
+                    match line {
+                        Ok(Some(line)) => {
+                            debug!(target: "kerrigan_cli::agent", "{}", line);
+                            text.push_str(&line);
+                            text.push('\n');
+                            if let Some(ref mut f) = log_file {
+                                let _ = f.write_all(line.as_bytes()).await;
+                                let _ = f.write_all(b"\n").await;
+                            }
                         }
+                        Ok(None) => break,
+                        Err(_) => break,
                     }
-                    Ok(None) => {} // stderr EOF, continue reading stdout
-                    Err(_) => {}
+                }
+                line = stderr_reader.next_line() => {
+                    match line {
+                        Ok(Some(line)) => {
+                            debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
+                            if let Some(ref mut f) = log_file {
+                                let _ = f.write_all(b"[stderr] ").await;
+                                let _ = f.write_all(line.as_bytes()).await;
+                                let _ = f.write_all(b"\n").await;
+                            }
+                        }
+                        Ok(None) => { stderr_done = true; }
+                        Err(_) => { stderr_done = true; }
+                    }
                 }
             }
         }
     }
 
     // Drain any remaining stderr after stdout EOF
-    while let Ok(Some(line)) = stderr_reader.next_line().await {
-        debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
-        if let Some(ref mut f) = log_file {
-            let _ = f.write_all(b"[stderr] ").await;
-            let _ = f.write_all(line.as_bytes()).await;
-            let _ = f.write_all(b"\n").await;
+    if !stderr_done {
+        while let Ok(Some(line)) = stderr_reader.next_line().await {
+            debug!(target: "kerrigan_cli::agent::stderr", "{}", line);
+            if let Some(ref mut f) = log_file {
+                let _ = f.write_all(b"[stderr] ").await;
+                let _ = f.write_all(line.as_bytes()).await;
+                let _ = f.write_all(b"\n").await;
+            }
         }
     }
 

@@ -16,6 +16,9 @@ Your job in this first round is to:
 
 The **kerrigan-storage** skill documentation is available at `{{ skills_path }}`.
 
+## User Messages
+The user may send messages to you during execution via `{{ board_path }}`. **Read this file before you start working.** If it is non-empty, you have unread messages — incorporate the user's instructions into your current work. Once you have fully addressed the messages, clear the file (write empty content) to mark them as read.
+
 ## Rules
 - Each node executes **exactly once**. Never retry in place — create new nodes instead.
 - Always write structured `result_summary` when marking a node as `succeeded` (see guide for template).

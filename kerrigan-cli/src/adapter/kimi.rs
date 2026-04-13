@@ -83,6 +83,13 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    fn args_of(cmd: &Command) -> Vec<String> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_str().unwrap().to_owned())
+            .collect()
+    }
+
     #[test]
     fn run_command_construction() {
         let adapter = KimiAdapter::new();
@@ -92,42 +99,81 @@ mod tests {
             Some(Path::new("/tmp/skills")),
             Path::new("/tmp/work"),
         );
-        let cmd = cmd.as_std();
 
-        assert_eq!(cmd.get_program(), "kimi");
-        let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert!(args.contains(&"--print"));
-        assert!(args.contains(&"--yolo"));
-        assert!(args.contains(&"--session"));
-        assert!(args.contains(&"sess_001"));
-        assert!(args.contains(&"--skills-dir"));
-        assert!(args.contains(&"/tmp/skills"));
-        assert!(args.contains(&"--prompt"));
-        assert!(args.contains(&"hello"));
+        assert_eq!(cmd.as_std().get_program(), "kimi");
+        let args = args_of(&cmd);
+        assert!(args.contains(&"--print".into()));
+        assert!(args.contains(&"--yolo".into()));
+        assert!(args.contains(&"--session".into()));
+        assert!(args.contains(&"sess_001".into()));
+        assert!(args.contains(&"--skills-dir".into()));
+        assert!(args.contains(&"/tmp/skills".into()));
+        assert!(args.contains(&"--prompt".into()));
+        assert!(args.contains(&"hello".into()));
     }
 
     #[test]
     fn run_command_without_skills() {
         let adapter = KimiAdapter::new();
         let cmd = adapter.build_run_command("test", "s1", None, Path::new("/tmp"));
-        let cmd = cmd.as_std();
-
-        let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert!(!args.contains(&"--skills-dir"));
+        assert!(!args_of(&cmd).contains(&"--skills-dir".into()));
     }
 
     #[test]
     fn resume_command_construction() {
         let adapter = KimiAdapter::new();
-        let cmd = adapter.build_resume_command("sess_001", "continue", Path::new("/tmp"));
-        let cmd = cmd.as_std();
+        let args = args_of(&adapter.build_resume_command("sess_001", "continue", Path::new("/tmp")));
+        assert!(args.contains(&"--continue".into()));
+        assert!(args.contains(&"--session".into()));
+        assert!(args.contains(&"sess_001".into()));
+        assert!(args.contains(&"--prompt".into()));
+        assert!(args.contains(&"continue".into()));
+        assert!(args.contains(&"--yolo".into()));
+    }
 
-        let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert!(args.contains(&"--continue"));
-        assert!(args.contains(&"--session"));
-        assert!(args.contains(&"sess_001"));
-        assert!(args.contains(&"--prompt"));
-        assert!(args.contains(&"continue"));
-        assert!(args.contains(&"--yolo"));
+    #[test]
+    fn run_has_stream_json_output() {
+        let adapter = KimiAdapter::new();
+        let args = args_of(&adapter.build_run_command("p", "s1", None, Path::new("/tmp")));
+        assert!(args.contains(&"--output-format".into()));
+        assert!(args.contains(&"stream-json".into()));
+    }
+
+    #[test]
+    fn resume_has_stream_json_output() {
+        let adapter = KimiAdapter::new();
+        let args = args_of(&adapter.build_resume_command("s1", "p", Path::new("/tmp")));
+        assert!(args.contains(&"--output-format".into()));
+        assert!(args.contains(&"stream-json".into()));
+    }
+
+    #[test]
+    fn run_and_resume_share_core_flags() {
+        let adapter = KimiAdapter::new();
+        let run_args = args_of(&adapter.build_run_command("p", "s1", None, Path::new("/tmp")));
+        let resume_args = args_of(&adapter.build_resume_command("s1", "p", Path::new("/tmp")));
+
+        for flag in ["--print", "--yolo", "--output-format", "stream-json", "--session"] {
+            assert!(run_args.contains(&flag.into()), "run() missing: {flag}");
+            assert!(resume_args.contains(&flag.into()), "resume() missing: {flag}");
+        }
+    }
+
+    #[test]
+    fn output_format_value_is_stream_json() {
+        let adapter = KimiAdapter::new();
+        for (label, args) in [
+            ("run", args_of(&adapter.build_run_command("p", "s1", None, Path::new("/tmp")))),
+            ("resume", args_of(&adapter.build_resume_command("s1", "p", Path::new("/tmp")))),
+        ] {
+            let idx = args.iter().position(|a| a == "--output-format")
+                .unwrap_or_else(|| panic!("{label}: missing --output-format"));
+            assert_eq!(args[idx + 1], "stream-json", "{label}: wrong format value");
+        }
+    }
+
+    #[test]
+    fn adapter_name_is_kimi() {
+        assert_eq!(KimiAdapter::new().name(), "kimi");
     }
 }

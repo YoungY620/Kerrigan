@@ -23,6 +23,7 @@ pub fn render_init(
     origin_node_id: &str,
     skills_path: &str,
     guide_path: &str,
+    board_path: &str,
 ) -> String {
     let env = env();
     let tmpl = env.get_template("init").unwrap();
@@ -31,6 +32,7 @@ pub fn render_init(
         origin_node_id => origin_node_id,
         skills_path => skills_path,
         guide_path => guide_path,
+        board_path => board_path,
     })
     .unwrap()
 }
@@ -42,6 +44,7 @@ pub fn render_continue(
     ready_nodes: &[NodeSummary],
     skills_path: &str,
     guide_path: &str,
+    board_path: &str,
 ) -> String {
     let env = env();
     let tmpl = env.get_template("continue").unwrap();
@@ -50,6 +53,7 @@ pub fn render_continue(
         round => round,
         skills_path => skills_path,
         guide_path => guide_path,
+        board_path => board_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -65,6 +69,7 @@ pub fn render_resume(
     ready_nodes: &[NodeSummary],
     skills_path: &str,
     guide_path: &str,
+    board_path: &str,
 ) -> String {
     let env = env();
     let tmpl = env.get_template("resume").unwrap();
@@ -73,6 +78,7 @@ pub fn render_resume(
         task_summary => task_summary,
         skills_path => skills_path,
         guide_path => guide_path,
+        board_path => board_path,
         ready_nodes => ready_nodes.iter().map(|n| context! {
             id => &n.id,
             summary => &n.summary,
@@ -82,10 +88,11 @@ pub fn render_resume(
 }
 
 /// Render the fix template (DAG validation failed).
-pub fn render_fix(issues: &[DagIssue]) -> String {
+pub fn render_fix(issues: &[DagIssue], board_path: &str) -> String {
     let env = env();
     let tmpl = env.get_template("fix").unwrap();
     tmpl.render(context! {
+        board_path => board_path,
         issues => issues.iter().map(|i| context! {
             node_id => &i.node_id,
             description => &i.description,
@@ -118,6 +125,7 @@ mod tests {
 
     const SKILLS_PATH: &str = "/home/user/.kerrigan/skills/kerrigan-storage/SKILL.md";
     const GUIDE_PATH: &str = "/home/user/.kerrigan/shared/guide.md";
+    const BOARD_PATH: &str = "/home/user/.kerrigan/tasks/task-abc/board.md";
 
     #[test]
     fn init_template_renders() {
@@ -126,6 +134,7 @@ mod tests {
             "origin-node-123",
             SKILLS_PATH,
             GUIDE_PATH,
+            BOARD_PATH,
         );
         assert!(result.contains("Refactor auth module"));
         assert!(result.contains("origin-node-123"));
@@ -136,7 +145,7 @@ mod tests {
 
     #[test]
     fn continue_template_renders() {
-        let result = render_continue("task-abc", 3, &sample_nodes(), SKILLS_PATH, GUIDE_PATH);
+        let result = render_continue("task-abc", 3, &sample_nodes(), SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
         assert!(result.contains("Round 3"));
         assert!(result.contains("n1"));
         assert!(result.contains("n2"));
@@ -153,6 +162,7 @@ mod tests {
             &sample_nodes(),
             SKILLS_PATH,
             GUIDE_PATH,
+            BOARD_PATH,
         );
         assert!(result.contains("new session"));
         assert!(result.contains("Refactor auth"));
@@ -164,8 +174,7 @@ mod tests {
 
     #[test]
     fn init_template_contains_guide_instructions() {
-        let result = render_init("Test task", "origin-1", SKILLS_PATH, GUIDE_PATH);
-        // Should instruct agent to read guide before starting
+        let result = render_init("Test task", "origin-1", SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
         assert!(result.contains("guide"));
         assert!(result.contains("result_summary"));
         assert!(result.contains("failure_reason"));
@@ -179,33 +188,32 @@ mod tests {
             &sample_nodes(),
             SKILLS_PATH,
             GUIDE_PATH,
+            BOARD_PATH,
         );
-        // Resume in new session should reference guide
         assert!(result.contains("guide"));
         assert!(result.contains("result_summary"));
     }
 
     #[test]
     fn templates_with_empty_guide_path() {
-        // guide_path can be empty if shared_dir is not configured
-        let result = render_init("Test task", "origin-1", SKILLS_PATH, "");
+        let result = render_init("Test task", "origin-1", SKILLS_PATH, "", BOARD_PATH);
         assert!(result.contains("Test task"));
         assert!(result.contains("origin-1"));
 
-        let result = render_continue("task-abc", 1, &sample_nodes(), SKILLS_PATH, "");
+        let result = render_continue("task-abc", 1, &sample_nodes(), SKILLS_PATH, "", BOARD_PATH);
         assert!(result.contains("n1"));
 
-        let result = render_resume("task-abc", "Test", &sample_nodes(), SKILLS_PATH, "");
+        let result = render_resume("task-abc", "Test", &sample_nodes(), SKILLS_PATH, "", BOARD_PATH);
         assert!(result.contains("n1"));
     }
 
     #[test]
     fn templates_with_empty_nodes() {
         let empty: Vec<NodeSummary> = vec![];
-        let result = render_continue("task-abc", 1, &empty, SKILLS_PATH, GUIDE_PATH);
+        let result = render_continue("task-abc", 1, &empty, SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
         assert!(result.contains("Round 1"));
 
-        let result = render_resume("task-abc", "Test", &empty, SKILLS_PATH, GUIDE_PATH);
+        let result = render_resume("task-abc", "Test", &empty, SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
         assert!(result.contains("Test"));
     }
 
@@ -221,9 +229,27 @@ mod tests {
                 description: "Empty summary".into(),
             },
         ];
-        let result = render_fix(&issues);
+        let result = render_fix(&issues, BOARD_PATH);
         assert!(result.contains("n1"));
         assert!(result.contains("Missing result_summary"));
         assert!(result.contains("n2"));
+    }
+
+    #[test]
+    fn all_templates_contain_board_path() {
+        let nodes = sample_nodes();
+
+        let init = render_init("task", "o1", SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
+        assert!(init.contains(BOARD_PATH), "init template missing board_path");
+
+        let cont = render_continue("t1", 1, &nodes, SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
+        assert!(cont.contains(BOARD_PATH), "continue template missing board_path");
+
+        let resume = render_resume("t1", "task", &nodes, SKILLS_PATH, GUIDE_PATH, BOARD_PATH);
+        assert!(resume.contains(BOARD_PATH), "resume template missing board_path");
+
+        let issues = vec![DagIssue { node_id: "n1".into(), description: "test".into() }];
+        let fix = render_fix(&issues, BOARD_PATH);
+        assert!(fix.contains(BOARD_PATH), "fix template missing board_path");
     }
 }

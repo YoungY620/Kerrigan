@@ -9,6 +9,13 @@ pub enum CliError {
         source: std::io::Error,
     },
 
+    #[error("no progress after {stall_rounds} rounds (round {round}): {reason}")]
+    Stall {
+        round: usize,
+        stall_rounds: usize,
+        reason: String,
+    },
+
     #[error("storage error: {0}")]
     Storage(#[from] kerrigan_storage::StorageError),
 }

@@ -9,7 +9,7 @@ compatibility: Requires kerrigan and kerrigan-storage binaries in PATH
 
 # Kerrigan Swarm
 
-Launch and manage background multi-agent tasks powered by the Kerrigan DAG framework.
+Launch and manage background multi-agent tasks powered by the Kerrigan DAG framework. These tasks are long-running — use an async/background task to execute `kerrigan-cli run` and avoid blocking your session.
 
 ## Installation
 

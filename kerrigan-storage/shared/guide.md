@@ -27,7 +27,7 @@ After receiving a ready node, follow this workflow:
 
 ### Execute First, Decompose Later
 
-- **Do not plan more than two steps ahead.** In the first round, only perform coarse-grained decomposition (2-3 high-level nodes). In subsequent rounds, decide whether further refinement is needed based on execution results.
+- **Do not plan more than two dependency layers ahead.** Planning depth (sequential chain length) should not exceed two steps — don't try to predict what happens after the next step's results come in. However, the number of parallel nodes at each layer is unlimited and should be as many as the task requires (e.g., multiple independent cross-validation nodes, parallel analysis from different angles). In subsequent rounds, decide whether further depth is needed based on execution results.
 - **Act first, but with small-scale probing.** When unsure whether decomposition is needed, start with a minimal-scope attempt to verify feasibility and manageable complexity. Ensure each step can be promptly rolled back to avoid going too far astray. If complexity exceeds expectations, stop immediately and decompose into sub-nodes.
 - **Validate feasibility before full implementation.** Before committing to full execution, use multiple independent cross-validation nodes to assess whether the approach is viable, dependencies are met, and assumptions hold. Eliminate infeasible paths at minimal cost.
 - **Existing plans can be restructured at any time.** When you find the decomposition is suboptimal, add new nodes and establish new dependencies to adjust the path.

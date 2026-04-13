@@ -14,24 +14,32 @@ Launch and manage background multi-agent tasks powered by the Kerrigan DAG frame
 ## Quick Start
 
 ```bash
-# Initialize (first time only)
-kerrigan-storage init
+# Run a new task (creates task + builds DAG + executes automatically)
+kerrigan-cli run --summary "Refactor auth module" --workdir /path/to/project
 
-# Create a task
-kerrigan-storage task create --summary "Refactor auth module" --workdir /path/to/project
-# Output: {"task_id":"abc-123"}
+# Resume an existing task
+kerrigan-cli resume <task-id>
 
-# Build the DAG (kerrigan-storage is used to set up the task graph)
-kerrigan-storage add --task abc-123 --summary "Analyze current code" --description "..."
-kerrigan-storage add --task abc-123 --summary "Design new architecture" --depends-on <node-1-id>
-kerrigan-storage add --task abc-123 --summary "Implement changes" --depends-on <node-2-id>
+# Check status of all tasks
+kerrigan-cli status
 
-# Run the task in background (this is the main user-facing command)
-kerrigan-cli run abc-123 --adapter claude
+# Check status of a specific task's DAG
+kerrigan-cli status <task-id>
 
-# Check progress (use kerrigan-storage to query DAG state)
-kerrigan-storage list --task abc-123
-kerrigan-storage ready --task abc-123
+# Send a message to a running task
+kerrigan-cli tell <task-id> --message "Please also check the database migration"
+```
+
+## Options
+
+```bash
+kerrigan-cli run --summary "..." --workdir .    # Required: task description and directory
+                 --adapter claude               # Agent backend: claude (default) or kimi
+                 --max-turns 10                 # Session rotation interval (default: 10)
+                 -v                             # Info logging
+                 -vv                            # Debug logging with agent output streaming
+
+kerrigan-cli resume <task-id>                   # Same options as run (--adapter, --max-turns, -v)
 ```
 
 ## Examples
@@ -39,71 +47,47 @@ kerrigan-storage ready --task abc-123
 ### Deploy a code review pipeline
 
 ```bash
-kerrigan-storage task create --summary "Review PR #42: add caching layer" --workdir ~/project
-# Output: {"task_id":"abc-123"}
-
-kerrigan-storage add --task abc-123 --summary "Read the PR diff and understand changes" --description "Use git diff to read all changes in the PR. Summarize what was changed and why."
-# Output: {"node_id":"n1"}
-
-kerrigan-storage add --task abc-123 --summary "Check for security issues" --description "Review the caching implementation for potential security vulnerabilities: cache poisoning, unauthorized access, data leaks." --depends-on n1
-# Output: {"node_id":"n2"}
-
-kerrigan-storage add --task abc-123 --summary "Check for performance issues" --description "Analyze cache hit/miss patterns, TTL settings, memory usage, and eviction policy." --depends-on n1
-# Output: {"node_id":"n3"}
-
-kerrigan-storage add --task abc-123 --summary "Write review summary" --description "Combine findings from security and performance reviews into a final review comment." --depends-on n2,n3
-# Output: {"node_id":"n4"}
-
-# Launch (long-running, run in background)
-kerrigan-cli run abc-123 --adapter claude
+kerrigan-cli run --summary "Review PR #42: add caching layer — check security, performance, and write review summary" --workdir ~/project --adapter claude
 ```
 
-### Monitor a running task
+The agent will automatically decompose this into DAG nodes (analyze diff, security review, performance review, write summary), execute them with subagents, and produce the final output.
+
+### Monitor and interact
 
 ```bash
 # List all tasks
-kerrigan-storage task list
+kerrigan-cli status
 
-# See DAG overview
-kerrigan-storage list --task abc-123
+# Check DAG progress for a specific task
+kerrigan-cli status abc-123
 
-# Check what's currently ready to run
-kerrigan-storage ready --task abc-123
-
-# Read details of a specific node (including execution results)
-kerrigan-storage get --task abc-123 --node n2
+# Inject instructions into a running task
+kerrigan-cli tell abc-123 --message "Please also check the database migration in db/migrate/"
 ```
 
-### Send a message to a running task
+### Resume after interruption
 
 ```bash
-kerrigan-storage tell --task abc-123 --message "Please also check the database migration in db/migrate/"
+# The task ID was printed when you ran the task
+kerrigan-cli resume abc-123
 ```
-
-The orchestrator agent will see this message in its next round.
-
-## Command Reference
-
-| Command | Description |
-|---------|-------------|
-| `kerrigan-storage init` | Initialize ~/.kerrigan/ (first time) |
-| `kerrigan-storage task create --summary "..." --workdir .` | Create a new task |
-| `kerrigan-storage task list` | List all tasks |
-| `kerrigan-storage add --task <id> --summary "..." [--depends-on a,b]` | Add a DAG node |
-| `kerrigan-storage list --task <id>` | List all nodes |
-| `kerrigan-storage ready --task <id>` | List ready nodes |
-| `kerrigan-storage get --task <id> --node <id>` | Get node details |
-| `kerrigan-storage update --task <id> --input '<json>'` | Update node status |
-| `kerrigan-storage tell --task <id> --message "..."` | Send message to running task |
-| `kerrigan-cli run <task-id> --adapter claude\|kimi` | Run a task to completion |
-| `kerrigan-cli run <task-id> -v` | Run with info logging |
-| `kerrigan-cli run <task-id> -vv` | Run with agent output streaming |
 
 ## How it works
 
-1. You define a task and its DAG using `kerrigan-storage` (nodes + dependencies)
-2. `kerrigan-cli run` launches a main agent with DAG skills injected
-3. Each round, the agent reads ready nodes, dispatches subagents, and records results
+1. `kerrigan-cli run` creates a task, initializes the DAG, and launches the orchestration loop
+2. Each round, the orchestrator agent reads ready nodes, dispatches subagents, and records results
+3. Subagents use `kerrigan-storage` CLI (the internal DAG tool) to read/write node state
 4. Completed nodes unlock dependent nodes automatically
 5. The loop continues until no ready nodes remain
-6. Failed nodes don't block siblings — spawn retry nodes instead
+6. Failed nodes don't block siblings — the agent spawns retry nodes instead
+
+## Internal tools (used by agents, not users)
+
+Agents interact with the DAG via `kerrigan-storage` during execution:
+
+| Command | Description |
+|---------|-------------|
+| `kerrigan-storage ready --task <id>` | List ready nodes |
+| `kerrigan-storage get --task <id> --node <id>` | Get node details |
+| `kerrigan-storage add --task <id> --summary "..." [--depends-on a,b]` | Add a DAG node |
+| `kerrigan-storage update --task <id> --input '<json>'` | Update node status |

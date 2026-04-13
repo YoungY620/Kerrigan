@@ -25,6 +25,7 @@ impl KimiAdapter {
         let mut cmd = Command::new("kimi");
         cmd.current_dir(workdir);
         cmd.args(["--print", "--yolo"]);
+        cmd.args(["--output-format", "stream-json"]);
         cmd.args(["--session", session_id]);
 
         if let Some(dir) = skills_dir {
@@ -39,6 +40,7 @@ impl KimiAdapter {
         let mut cmd = Command::new("kimi");
         cmd.current_dir(workdir);
         cmd.args(["--print", "--yolo"]);
+        cmd.args(["--output-format", "stream-json"]);
         cmd.args(["--session", session_id]);
         cmd.arg("--continue");
         cmd.args(["--prompt", prompt]);

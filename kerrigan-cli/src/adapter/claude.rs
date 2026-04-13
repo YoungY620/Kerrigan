@@ -25,6 +25,7 @@ impl ClaudeAdapter {
         let mut cmd = Command::new("claude");
         cmd.current_dir(workdir);
         cmd.args(["--print", "--dangerously-skip-permissions"]);
+        cmd.args(["--output-format", "stream-json"]);
         cmd.args(["--session-id", session_id]);
 
         if let Some(dir) = skills_dir {
@@ -39,6 +40,7 @@ impl ClaudeAdapter {
         let mut cmd = Command::new("claude");
         cmd.current_dir(workdir);
         cmd.args(["--print", "--dangerously-skip-permissions"]);
+        cmd.args(["--output-format", "stream-json"]);
         cmd.args(["--resume", session_id]);
         cmd.args(["-p", prompt]);
         cmd

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.0] - 2026-04-14
+
+### Changed
+- Rewrote as single-crate async CLI (@patrick)
+
 ## [0.1.1] - 2026-04-14
 
 ### Added

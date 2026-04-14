@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1] - 2026-04-14
+
+### Added
+- Instructions for agents to keep background monitor on board file (@patrick)
+
+### Fixed
+- Added --verbose to claude adapter, fixed loop stall and board messaging issues (@patrick)
+
 ## [0.1.0] - 2026-04-13
 
 ### Added

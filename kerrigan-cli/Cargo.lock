@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "kerrigan-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "kerrigan-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "rusqlite",

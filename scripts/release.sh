@@ -159,18 +159,16 @@ info "CHANGELOG.md updated by kimi"
 
 # ── Sync Cargo.toml versions ──
 
-info "Updating Cargo.toml versions to ${VERSION}..."
-sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" kerrigan-storage/Cargo.toml
-sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" kerrigan-cli/Cargo.toml
+info "Updating Cargo.toml version to ${VERSION}..."
+sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
 
 # Regenerate Cargo.lock with new version
-(cd kerrigan-storage && cargo check --quiet 2>/dev/null)
-(cd kerrigan-cli && cargo check --quiet 2>/dev/null)
+cargo check --quiet 2>/dev/null
 
 # ── Commit, tag, push ──
 
 info "Committing release..."
-git add CHANGELOG.md kerrigan-storage/Cargo.toml kerrigan-cli/Cargo.toml kerrigan-storage/Cargo.lock kerrigan-cli/Cargo.lock
+git add CHANGELOG.md Cargo.toml Cargo.lock
 git commit -m "release: ${TAG}"
 
 info "Tagging ${TAG}..."

@@ -8,144 +8,216 @@
 
 后面的所有设计都基于这个假设（但这个假设也可能被推翻，需要验证）。
 
-## 其他方案？
+## 事决定人
 
-在确立这个方案之前，我们商讨和尝试过多种其他方案，最终都被一一否决。这里做一个总结。
+在确立这个方案之前，我们商讨和尝试过多种其他方案，最终都被一一否决。
 
 最常见的思路是照搬人类的即时通信工具和组织架构，原因有二：
 
-- **人机协同**：人类需要一个熟悉的界面来参与。目前大部分体验较好的 multi-agent 产品，基本都是出于这个原因。
-- **经验迁移**：很多人认为人工智能就是”虚拟人”，于是给 agent 接上 agent 版的 Facebook、WeChat、Twitter，或者套用人类的组织架构（经理/开发/测试，甚至三省六部制）来解决问题。但这个类比的前提本身就有问题。
+- **人机协同**：人类需要一个熟悉的界面来参与。
+- **经验迁移**：很多人认为人工智能就是"虚拟人"，于是给 agent 接上 agent 版的 Facebook、WeChat、Twitter，或者套用人类的组织架构来解决问题。但这个类比的前提本身就有问题。
 
-核心问题是：到底是通信工具定义了我们的沟通方式、组织架构定义了每个人的分工，还是我们共同面临的**事**定义了通信工具和组织架构？人的架构和事的架构，谁是因、谁是果？
+核心问题是：到底是通信工具定义了我们的沟通方式、组织架构定义了每个人的分工，还是我们共同面临的**事**定义了通信工具和组织架构？
 
 答案是事决定人。所有人与人之间的沟通和依赖，归根结底都由事的依赖决定。
 
-人的生理躯壳和上下文是绑定的，上下文切换需要巨大的心智和时间代价。因此人类组织面临一个两难：架构要稳定（降低切换成本），又要能应对灵活多变的事的变化。人工智能不是人——它的”生命”完全由输入的字符串（提示词）决定，这个字符串存在 `.kimi` 的 `context.jsonl` 里还是某个其他文件里没有任何区别。agent 的分工完全可以根据事的演化动态变化，不需要绑定到一个稳定的上下文和组织结构中。
+人的生理躯壳和上下文是绑定的，上下文切换需要巨大的心智和时间代价。因此人类组织面临一个两难：架构要稳定（降低切换成本），又要能应对灵活多变的事的变化。人工智能不是人——它的"生命"完全由输入的字符串决定。agent 的分工完全可以根据事的演化动态变化，不需要绑定到一个稳定的上下文和组织结构中。
 
-因此，我们真正要解决的不是 agent 之间应该怎样沟通，而是：**一件复杂的任务如何进行结构化的拆分和维护，以及如何在一个持久化、可读写的文件系统中承载这些结构。**
+因此，我们真正要解决的不是 agent 之间应该怎样沟通，而是：**一件复杂的任务如何进行结构化的拆分和维护，以及如何在一个持久化、可读写的存储中承载这些结构。**
 
 ## 无通信的通信协议
 
-很多 multi-agent 架构的论文或框架，不管叙事如何，都会涉及一个关键问题：agent 之间的通信复杂度。点对点通信、广播会导致上下文写放大，主动沟通还会打断另一个 agent 的正常工作（污染 session）。对人类来说这无法避免——这也是《人月神话》的核心论点。但对 agent 来说完全没有必要。
+很多 multi-agent 架构的论文或框架，都会涉及一个关键问题：agent 之间的通信复杂度。点对点通信、广播会导致上下文写放大，主动沟通还会打断另一个 agent 的正常工作。对人类来说这无法避免——这也是《人月神话》的核心论点。但对 agent 来说完全没有必要。
 
-agent 间通信的原因一定是任务之间存在依赖。任何复杂度的任务最终都可以分解，那么一定可以通过依赖分析构建为一个有向无环图（DAG）。DAG 可以做拓扑排序——每一轮遍历整个图，找到所有没有未完成前置依赖的节点，这些节点可以并行执行。每个 subagent 执行具体小任务时拿到的是刚好足够的上下文。
+agent 间通信的原因一定是任务之间存在依赖。任何复杂度的任务最终都可以分解，那么一定可以通过依赖分析构建为一个有向无环图（DAG）。DAG 可以做拓扑排序——找到所有没有未完成前置依赖的节点，这些节点可以并行执行。每个 agent 执行具体任务时拿到的是刚好足够的上下文。
 
 如果 agent 在执行中发现需要沟通，或从执行结果中发现需要进一步的任务？任何沟通都可以拆分为"沟通前"和"沟通后"两个节点。agent 只需停止当前任务、维护 DAG（增加/修改节点），下一轮继续按拓扑排序执行即可。
 
-## 维护 DAG
+## 架构
 
-上面的需求实际上只需要实现：
+### 三层结构
 
-1. 一个 Storage 层（DAG 管理 + 持久化存储）及相应的 CLI
-2. 相应的 skills，供 agent 操作 DAG
-3. 一个 agent adapter，使任何 agent CLI（kimi-cli、claude code 等）只需支持 `--resume`、subagent 和非交互式调用即可接入，最好还支持自定义 skills 目录
+```
+主 Agent（用户的 agent session）
+│  编排决策：分解任务、重构 DAG、启动/中断 worker、响应事件
+│
+├── kerrigan CLI ─── DAG 管理 + worker 生命周期 + 日志 + 事件流
+│
+└── Worker Agents（claude/kimi 后台进程）
+     各自独立运行，通过 kerrigan skill 回写状态
+```
 
-然后实现一个循环：每一轮调用主 agent（注入 DAG skills），由 agent 自行通过 skills 查找可执行节点、用 subagent 并行执行、回写结果。Kerrigan 的 loop 只负责检查终止条件（ready 节点为空）并反复调用主 agent——编排逻辑全在 agent 侧通过 skills 完成。
+**主 Agent** 是使用 kerrigan 的 agent。它负责所有编排决策——任务分解、DAG 重构、启动和中断 worker。主 agent 是事件驱动的：每次被唤醒（用户输入、worker 完成/失败事件），做一轮决策后返回，保持对用户的响应能力。
 
-### Storage（DAG 引擎 + 存储管理）
+**kerrigan CLI** 是无状态的命令行工具，管理三件事：
+1. DAG 状态（节点、依赖、状态流转、级联 Ready）
+2. Worker 生命周期（启动、消息注入、终止、崩溃兜底）
+3. 事件流（节点状态变化 → stdout JSON，供 Monitor 消费）
 
-#### 任务数据模型
+**Worker Agents** 是后台运行的 agent 进程（claude、kimi 等），各自独立执行一个 DAG 节点。每个 worker 拥有 kerrigan skill，能够读取前驱结果、回写自身状态、衍生新节点。Worker 不知道彼此的存在——它们通过 DAG 中的 `result_summary` 间接传递信息。
 
-一个任务包含以下字段：
+### 关键设计原则
 
-- **id**：任务唯一标识
-- **summary**：任务简述，足够简短，足够让人一眼理解任务意图
-- **description**：任务详细描述和相关引用，整体为 markdown 格式字符串
-- **successors**：依赖此任务的后继节点 id 列表
-- **status**：任务状态枚举（Pending / Ready / Running / Succeeded / Failed）
-- **metadata**：有限的可选字段
-  - 失败时：包括失败原因、是否需要增加新任务或新资源等。任务不管成功失败永远不会"继续"，只会执行一次并留下结果。如果需要"继续"，则生成新节点与现有节点建立依赖关系，产生新的结果。失败的任务会留下一个或多个后续任务，说明如何解决错误或进行相关探索，这些尝试的后续任务本质上是对原任务的重试。
-  - 成功时：给出执行结果的详细总结，保证后续 agent 能拿到足够的信息而不需要重新探索。
+- **编排在主 agent，不在框架**：kerrigan 不包含编排逻辑（不决定先做什么后做什么），只提供 DAG 操作和进程管理原语。所有"该怎么做"的决策由主 agent 的 prompt/skill 驱动。
+- **结果即通信**：`result_summary` 是核心通信机制。后续节点的 agent 通过 `kerrigan dag get` 读取前驱的结果摘要，不需要消息队列或共享文件。
+- **一次执行**：节点只执行一次，永不原地重试。失败后通过 `dag add` 衍生新的修复/重试节点并建立依赖关系。
+- **崩溃安全**：每个 worker 都有 exec wrapper 保障——不管 agent 怎么死，状态注册表都会被正确更新。
 
-#### 存储管理
+## Storage（DAG 引擎 + 持久化）
 
-Storage 层统一管理 `~/.kerrigan/` 下的全局状态，所有接口基于 task id 调用，调用方不需要知道文件路径细节：
+### 数据模型
+
+一个任务（task）包含一个 DAG，DAG 由节点（node）和边（edge）组成。
+
+**节点字段**：
+- **id**：唯一标识
+- **summary**：一行简述
+- **description**：详细描述（markdown），自包含到足够让一个 agent 独立执行
+- **predecessors / successors**：依赖关系（双向维护）
+- **status**：Pending → Ready → Running → Succeeded / Failed
+- **metadata**：
+  - `result_summary`：成功时的结果摘要，后续节点依赖此信息
+  - `failure_reason`：失败时的原因和建议修复方向
+  - `session_ids`：执行过此节点的 agent session 列表
+
+**状态流转**：
+- Pending：有未完成的前驱
+- Ready：所有前驱已 Succeeded（由引擎自动级联）
+- Running：正在被 worker 执行
+- Succeeded / Failed：终态
+
+### 存储后端
+
+两级 SQLite（均 WAL 模式）：
 
 ```text
 ~/.kerrigan/
-├── registry.json          # 注册表：所有任务的索引
-├── lock                   # 全局文件锁，保证并发安全
+├── registry.db              # 全局注册表
+├── skills/kerrigan/         # skill 文件（init 时部署）
 └── tasks/
     └── <task-id>/
-        ├── dag.json       # 该任务的 DAG 状态
-        ├── config.json    # 任务配置（工作目录、agent adapter 类型等）
-        ├── sessions.json  # 使用过的 session id 列表，用于 debug
-        ├── board.md       # 留言板，供人工向运行中的任务注入信息
-        └── shared/        # 该任务的共享文件（跨节点可访问的资源）
+        ├── task.db          # 任务级 DB
+        └── logs/
+            └── <node-id>.jsonl
 ```
 
-- **registry.json**：全局注册表，记录每个任务的 id、摘要、状态、创建时间、工作目录路径等
-- **tasks/\<task-id\>/**：每个任务独立一个目录，DAG 文件、session 记录、留言板等都在这里
-- **并发安全**：多个后台 swarm job 并发访问注册表、公共区域文件时，通过文件锁机制保证一致性
+**registry.db**（全局，极轻量）：
 
-#### 引擎接口
+- `tasks` — 任务索引（id, summary, workdir, created_at）
 
-所有接口基于 task id，引擎内部自动定位到 `~/.kerrigan/tasks/<task-id>/dag.json`：
+**task.db**（每任务独立，worker 并发写不跨任务竞争）：
 
-- `init()`：初始化 `~/.kerrigan/` 目录结构
-- `task_create(summary, workdir) -> task_id`：创建任务，生成目录，注册到 registry
-- `task_list() -> Vec<TaskEntry>`：列出所有注册的任务
-- `add_task(task_id, node, depends_on) -> node_id`：向指定任务的 DAG 添加新节点，指定依赖的前置节点 id 列表。自动维护前驱/后继双向关系，若所有前置已完成则状态直接为 Ready。
-- `list_all(task_id) -> Vec<NodeSummary>`：返回指定任务所有节点的轻量摘要（id、summary、successors、status），同时可用于统计各状态数量，了解全局进度。
-- `list_ready(task_id) -> Vec<NodeSummary>`：返回指定任务所有 status 为 Ready 的节点。
-- `update_nodes(task_id, Vec<NodeUpdate>)`：批量更新指定任务中一个或多个节点的字段值（status、metadata 等）。引擎内部根据状态变更自动处理级联——当某节点变为 Succeeded 时，检查其后继节点的前置是否全部完成，是则将后继变为 Ready。
-- `get_node(task_id, node_id) -> Node`：查询指定任务中单个节点的完整详情，包括 description 和 metadata。供 agent 读取前置节点的执行结果摘要。
+- `nodes` — 节点（id, summary, description, status, result_summary, failure_reason）
+- `node_edges` — DAG 边（predecessor_id, successor_id）
+- `processes` — 进程注册表（node_id, pid, session_id, adapter, log_path, status）
+- `node_messages` — 消息队列（node_id, content, consumed）
+- `node_sessions` — 历史 session 记录
 
-#### 关键设计原则
+任务隔离：删任务 = 删目录。全局 DB 只做索引。
 
-- **基于 id 操作**：所有接口通过 task id 和 node id 调用，不暴露文件路径细节，降低调用方复杂度。
-- **一次执行**：节点只执行一次，永不原地重试。失败后通过 `add_task` 衍生新的修复/重试节点并建立依赖关系。
-- **终止条件**：`list_ready()` 为空，即没有可执行节点。
-- **持久化**：DAG 状态持久化为 JSON 文件，每次状态变更后落盘，天然支持 `--resume` 恢复。
-- **职责分离**：引擎不负责执行，只维护图和状态。agent adapter 层负责调用具体 agent，拿到结果后调 `update_nodes` 回写。
-- **结果即通信**：`result_summary` 是核心通信机制——后续节点的 agent 通过 `get_node` 读取前置的结果摘要，而非共享文件或消息队列。
+### 引擎接口
 
-### Agent Adapter
+所有接口基于 task_id 和 node_id，不暴露文件路径：
 
-封装 agent CLI 的两个核心能力：subagent 调用和 session 管理。首批支持 Claude Code 和 Kimi CLI 两个 adapter。
+- `task_create(summary, workdir) → task_id`
+- `task_list() → Vec<TaskEntry>`
+- `add_node(task_id, node, depends_on) → node_id`：自动判定初始状态（Ready / Pending）
+- `list_all(task_id) → Vec<NodeSummary>`
+- `list_ready(task_id) → Vec<NodeSummary>`
+- `get_node(task_id, node_id) → Node`：包含完整 description 和前驱 result_summary
+- `update_nodes(task_id, Vec<NodeUpdate>)`：批量更新，自动级联 Ready
 
-- 非交互式 prompt 下发，支持 subagent，支持指定 session id（便于后续 resume）
-- 在指定的 session id 上 resume
-- 支持指定 skills 目录
-- 默认开启 YOLO 模式（自动批准所有工具调用，无需人工确认），agent 子任务需要全自动执行
+**级联逻辑**：当某节点变为 Succeeded 时，引擎检查其所有后继——若后继的全部前驱已 Succeeded，则将后继从 Pending 升为 Ready。循环执行直到无新变化。
 
-Session 由各 agent CLI 自行创建和管理（claude/kimi 各自的 session 机制），kerrigan 不做 session 归一化存储，只在 `sessions.json` 中记录 node_id 与 agent session id 的映射关系，用于 debug 追溯。
+## Worker 生命周期
 
-### Loop of Agent Loop
+### exec
 
-初始化一个任务后，Kerrigan 框架准备好标准的文件系统，然后进入循环。
+`kerrigan exec` 是 worker 的统一入口，支持两种模式：
 
-同一任务内所有轮次复用同一个 agent session。每经过 N 次 continue turn（默认 N=10）后，主动更换为新 session 并使用 resume 模板恢复上下文，避免单个 session 上下文过长导致质量下降。中断停机后恢复同样开新 session。每一轮提示词由 kerrigan 程序侧预先查询当前 ready 节点的 summary 信息并注入，同时要求 agent 使用 Storage skill 来获取节点详情、执行任务、回写结果。
+**`--detach`（后台）**：主 agent 常用。验证节点 Ready → 生成 session_id → fork 自身为后台进程 → 记录进程注册表 → 标记节点 Running → 立即返回 JSON。
 
-每轮 agent 执行完成后，kerrigan 程序侧对 DAG 进行静态一致性检查：
+**前台**：实际执行 agent。流程：
 
-- 前驱为空的节点是否为 Ready 状态
-- Ready 节点是否确实没有未完成的前驱
-- Succeeded/Failed 节点是否有 result_summary / failure_reason
-- 必要字段（summary、description）是否非空
+1. 打开 log 文件（追加），写入 exec_start 事件
+2. 根据 adapter 名称直接 match 构建 agent 命令：
+   - `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --session-id <uuid> -p "<prompt>"`
+   - `kimi --print --yolo --output-format stream-json --session <id> --prompt "<prompt>"`
+3. 启动 agent 子进程，逐行读取 stdout 写入 log 文件
+4. `wait()` 等待 agent 退出
+5. 退出判定：
+   - 状态已 terminal → agent 自行收尾，正常退出
+   - exit code = 0 + 仍 Running → turn 正常完成，检查消息队列：有消息则 `--resume` 继续，无消息则退出
+   - exit code ≠ 0 + 仍 Running → 崩溃，标记节点 Failed
+6. SIGTERM 处理：kill agent → 检查队列 → 有消息则 resume，无则退出
 
-如果检查不通过，构造修复提示词 resume 同一 session 要求 agent 修正，直到 DAG 状态一致。
+**日志**：同一节点的所有 turn 追加到同一个 `.jsonl` 文件。包含 kerrigan wrapper 事件和 agent 的完整 stream-json 输出。
 
-需要准备四个提示词模板：
+### send
 
-1. **Init**：任务的第一轮。注入所有 ready 节点的 summary，要求 agent 通过 Storage skill 获取详情和前置结果，用 subagent 并行执行，完成后回写结果和衍生新节点。
-2. **Continue**：同一 session 内的后续轮次，注入最新 ready 节点 summary。
-3. **Resume**：中断恢复或 session 轮换时开新 session。注入最新 ready 节点 summary，引导 agent 阅读已有信息、了解全貌后继续。
-4. **Fix**：静态检查不通过时，resume 当前 session，注入具体的不一致问题列表，要求 agent 修正 DAG。
+`kerrigan send` 向运行中（或已暂停）的 worker 注入消息：
 
-### 外部信息输入
+1. 写消息到 `node_messages` 表
+2. 如果 exec 没在运行 → fork 新 exec（消费队列后 `--resume`）
+3. 如果 exec 在运行 + `--interrupt` → 发 SIGTERM（exec 中断后消费队列）
+4. 如果 exec 在运行 + 无 interrupt → 什么都不做（当前 turn 结束后 exec 自动消费）
 
-提供一个留言板文件（`board.md`）。每轮提示词中引导主 agent 检测此文件的变化，并决定是否修改 DAG 或中断某些 subagent。
+### stop
 
-### 跨任务打通
+`kerrigan stop` 终止 worker：查进程注册表 → kill PID → 更新状态。
 
-不同任务之间分别管理各自的 DAG，通过 Storage 的统一接口（`task_list`、`task_create` 等）统一管理。存储结构和注册表由 Storage 层维护（见上文"存储管理"），Kerrigan CLI 基于这些接口实现上层编排，所有任务在后台执行，用户通过 CLI 查询和维护。
+### 崩溃保障
 
-### Skills
+两级保障：
+1. **exec wrapper 兜底**：agent 进程崩溃后，exec wrapper 检测到非零 exit code + 状态仍 Running → 标记 Failed。
+2. **watch PID 检查**：极端情况下 exec wrapper 本身被 kill → watch 检测到 PID 死亡 + 节点仍 Running → 60s 超时后标记 Failed。
 
-两个层次的 skills：
+## 事件流
 
-1. **Storage skills**：Storage CLI 封装为 skills，供 Kerrigan loop 中调用的 agent CLI 使用
-2. **Kerrigan CLI skills**：Kerrigan CLI 封装为 skills，供外部任何 agent 使用，用于部署后台服务，或直接适配到 chatbot
-   - 是否需要一个 SDK（优先级非常低）
+`kerrigan watch <task-id>` 是长运行进程，每 N 秒轮询 DB，输出状态变化事件到 stdout（一行一个 JSON），设计用于对接 Claude Code 的 Monitor 机制：
+
+```jsonl
+{"ts":"...","node":"abc","event":"succeeded","summary":"Analyze auth","result":"Found 3 files"}
+{"ts":"...","node":"def","event":"ready","summary":"Implement changes"}
+{"ts":"...","event":"process_died","node":"ghi","pid":1234}
+{"ts":"...","event":"task_complete","succeeded":5,"failed":0}
+```
+
+主 agent 通过 Monitor 消费这些事件，驱动下一轮编排决策。
+
+## Skills
+
+kerrigan 的 skill 目录（`~/.kerrigan/skills/kerrigan/`）包含：
+
+1. **SKILL.md**：CLI 命令参考和使用指导，供 worker agent 学习如何操作 DAG
+2. **guide.md** + 场景指导：任务执行原则、分解策略、结果格式模板。基于学术研究（MASS, ADaPT, MetaGPT 等）设计，核心原则包括：
+   - prompt 优化 > agent 数量扩展
+   - 先执行再分解（ADaPT），规划深度限制为 2 层
+   - 结构化产物 > 自由文本
+   - 执行反馈 > 多 agent 讨论
+   - 透明披露所有已知问题
+
+`kerrigan init` 时部署到 `~/.kerrigan/skills/`。Worker agent 通过 `--add-dir`（claude）或 `--skills-dir`（kimi）加载。
+
+## CLI 命令总览
+
+```bash
+kerrigan init                                              # 初始化
+kerrigan task create --summary "..." [--workdir .]         # 创建任务
+kerrigan task list                                         # 列出任务
+
+kerrigan dag add --task <id> --summary "..." [...]         # 添加节点
+kerrigan dag list --task <id>                              # 所有节点
+kerrigan dag ready --task <id>                             # 可执行节点
+kerrigan dag get --task <id> --node <id>                   # 节点详情
+kerrigan dag update --task <id> --input '<json>'           # 批量更新
+
+kerrigan exec --task <id> --node <id> --adapter claude [--detach]
+kerrigan send --node <id> --message "..." [--interrupt]
+kerrigan stop --node <id>
+
+kerrigan watch <task-id> [--interval 2]
+kerrigan status [task-id]
+```
+
+所有命令输出 JSON。

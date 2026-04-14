@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
-pub enum StorageError {
-    #[error("not initialized: run `kerrigan-storage init` first")]
+pub enum Error {
+    #[error("not initialized: run `kerrigan init` first")]
     NotInitialized,
 
     #[error("task not found: {0}")]
@@ -38,11 +38,17 @@ pub enum StorageError {
 
     #[error("database error: {0}")]
     Db(String),
+
+    #[error("process not found for node: {0}")]
+    ProcessNotFound(String),
+
+    #[error("node has active process (pid {pid})")]
+    NodeBusy { pid: u32 },
 }
 
-pub type Result<T> = std::result::Result<T, StorageError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-impl StorageError {
+impl Error {
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
             path: path.into(),

@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub type TaskId = String;
 pub type NodeId = String;
@@ -12,11 +11,6 @@ pub struct TaskEntry {
     pub summary: String,
     pub workdir: String,
     pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Registry {
-    pub tasks: Vec<TaskEntry>,
 }
 
 // ── DAG ──
@@ -73,11 +67,6 @@ impl From<&Node> for NodeSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Dag {
-    pub nodes: HashMap<NodeId, Node>,
-}
-
 // ── Input types ──
 
 pub struct NewNode {
@@ -94,18 +83,36 @@ pub struct NodeUpdate {
     pub metadata: Option<NodeMetadata>,
 }
 
-// ── Task config ──
+// ── Process tracking ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskConfig {
-    pub workdir: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessStatus {
+    Running,
+    Exited,
+    Killed,
 }
 
-// ── Board messages ──
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessEntry {
+    pub id: i64,
+    pub node_id: NodeId,
+    pub pid: u32,
+    pub session_id: String,
+    pub adapter: String,
+    pub log_path: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub exit_code: Option<i32>,
+    pub status: ProcessStatus,
+}
+
+// ── Node messages ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoardMessage {
+pub struct NodeMessage {
     pub id: i64,
+    pub node_id: NodeId,
     pub content: String,
     pub created_at: String,
 }

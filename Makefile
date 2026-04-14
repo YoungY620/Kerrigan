@@ -1,25 +1,23 @@
-.PHONY: check check-storage check-cli release clean
+.PHONY: check release clean install
 
-# Run all checks (both crates, parallel-safe)
-check: check-storage check-cli
+# Run all checks
+check:
+	cargo fmt --check
+	cargo clippy -- -D warnings
+	cargo test
 
-check-storage:
-	cd kerrigan-storage && make check
-
-check-cli:
-	cd kerrigan-cli && make check
+# Install to ~/.local/bin
+install:
+	cargo install --path . && cp ~/.cargo/bin/kerrigan ~/.local/bin/kerrigan
 
 # Release: auto-detect version bump from commits, generate changelog, tag, push
-# Usage: make release              (auto version)
-#        make release VERSION=1.0.0 (manual override)
 release:
 	./scripts/release.sh $(VERSION)
 
-# Check CI status on GitHub (run after push)
+# Check CI status
 ci:
 	./scripts/check-ci.sh
 
-# Clean both crates
+# Clean build artifacts
 clean:
-	cd kerrigan-storage && make clean
-	cd kerrigan-cli && make clean
+	cargo clean

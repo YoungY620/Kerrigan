@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1] - 2026-04-15
+
+### Added
+- Reminder envelope to all CLI responses with improved error messages and docs (@patrick)
+- Agent benchmark research notes (@patrick)
+
 ## [1.0.0] - 2026-04-14
 
 ### Changed

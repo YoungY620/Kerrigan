@@ -130,7 +130,13 @@ mod tests {
     #[test]
     fn task_db_creates_all_tables() {
         let conn = open_task_memory().unwrap();
-        for table in ["nodes", "node_edges", "node_sessions", "processes", "node_messages"] {
+        for table in [
+            "nodes",
+            "node_edges",
+            "node_sessions",
+            "processes",
+            "node_messages",
+        ] {
             let count: i64 = conn
                 .query_row(
                     &format!(

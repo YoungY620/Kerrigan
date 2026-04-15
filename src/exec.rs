@@ -17,12 +17,7 @@ pub struct ExecDetachResult {
 }
 
 /// Run the exec command.
-pub fn run(
-    task_id: &str,
-    node_id: &str,
-    adapter: &str,
-    detach: bool,
-) -> Result<()> {
+pub fn run(task_id: &str, node_id: &str, adapter: &str, detach: bool) -> Result<()> {
     let registry = RegistryEngine::default_root()?;
     let task_dir = registry.task_dir(task_id);
     let task_engine = TaskEngine::open(&task_dir)?;
@@ -63,9 +58,12 @@ pub fn run(
         let child = Command::new(exe)
             .args([
                 "exec",
-                "--task", task_id,
-                "--node", node_id,
-                "--adapter", adapter,
+                "--task",
+                task_id,
+                "--node",
+                node_id,
+                "--adapter",
+                adapter,
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -93,12 +91,20 @@ pub fn run(
             session_id,
             log_path: log_path.to_string_lossy().into_owned(),
         };
-        println!("{}", serde_json::to_string(&result).unwrap());
+        crate::output::output_json(&result);
         return Ok(());
     }
 
     // ── Foreground mode ──
-    run_foreground(&registry, &task_engine, task_id, node_id, adapter, &session_id, &log_path)
+    run_foreground(
+        &registry,
+        &task_engine,
+        task_id,
+        node_id,
+        adapter,
+        &session_id,
+        &log_path,
+    )
 }
 
 /// Resume an existing session (called by send).
@@ -118,10 +124,31 @@ pub fn run_resume(
 
     // Record this exec instance
     let pid = std::process::id();
-    task_engine.process_create(node_id, pid, session_id, adapter, &log_path.to_string_lossy())?;
+    task_engine.process_create(
+        node_id,
+        pid,
+        session_id,
+        adapter,
+        &log_path.to_string_lossy(),
+    )?;
 
-    run_agent_turn(&task_engine, node_id, adapter, session_id, Some(message), &log_path)?;
-    drain_message_queue(&registry, &task_engine, task_id, node_id, adapter, session_id, &log_path)
+    run_agent_turn(
+        &task_engine,
+        node_id,
+        adapter,
+        session_id,
+        Some(message),
+        &log_path,
+    )?;
+    drain_message_queue(
+        &registry,
+        &task_engine,
+        task_id,
+        node_id,
+        adapter,
+        session_id,
+        &log_path,
+    )
 }
 
 fn run_foreground(
@@ -136,7 +163,9 @@ fn run_foreground(
     let task_dir = registry.task_dir(task_id);
     let te = TaskEngine::open(&task_dir)?;
     run_agent_turn(&te, node_id, adapter, session_id, None, log_path)?;
-    drain_message_queue(registry, &te, task_id, node_id, adapter, session_id, log_path)
+    drain_message_queue(
+        registry, &te, task_id, node_id, adapter, session_id, log_path,
+    )
 }
 
 /// Run a single agent turn. If `resume_message` is None, starts a new session with initial prompt.
@@ -158,15 +187,22 @@ fn run_agent_turn(
         .open(log_path)
         .map_err(|e| Error::io(log_path, e))?;
 
-    let mode = if resume_message.is_some() { "resume" } else { "run" };
-    write_log_event(&mut log_file, &serde_json::json!({
-        "type": "kerrigan",
-        "event": "exec_start",
-        "mode": mode,
-        "node": node_id,
-        "session": session_id,
-        "ts": now_iso(),
-    }));
+    let mode = if resume_message.is_some() {
+        "resume"
+    } else {
+        "run"
+    };
+    write_log_event(
+        &mut log_file,
+        &serde_json::json!({
+            "type": "kerrigan",
+            "event": "exec_start",
+            "mode": mode,
+            "node": node_id,
+            "session": session_id,
+            "ts": now_iso(),
+        }),
+    );
 
     // Build command
     let skills_dir = registry.skills_dir();
@@ -184,7 +220,12 @@ fn run_agent_turn(
             } else {
                 c.args(["--session-id", session_id]);
                 c.args(["--add-dir", &skills_dir.to_string_lossy()]);
-                let prompt_text = prompt::build_prompt(&registry, &TaskEngine::open(&registry.task_dir(&task_id))?, &task_id, node_id)?;
+                let prompt_text = prompt::build_prompt(
+                    &registry,
+                    &TaskEngine::open(&registry.task_dir(&task_id))?,
+                    &task_id,
+                    node_id,
+                )?;
                 c.args(["-p", &prompt_text]);
             }
             c
@@ -199,7 +240,12 @@ fn run_agent_turn(
             } else {
                 c.args(["--session", session_id]);
                 c.args(["--skills-dir", &skills_dir.to_string_lossy()]);
-                let prompt_text = prompt::build_prompt(&registry, &TaskEngine::open(&registry.task_dir(&task_id))?, &task_id, node_id)?;
+                let prompt_text = prompt::build_prompt(
+                    &registry,
+                    &TaskEngine::open(&registry.task_dir(&task_id))?,
+                    &task_id,
+                    node_id,
+                )?;
                 c.args(["--prompt", &prompt_text]);
             }
             c
@@ -218,10 +264,8 @@ fn run_agent_turn(
     // Stream stdout to log
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                writeln!(log_file, "{line}").ok();
-            }
+        for line in reader.lines().map_while(|r| r.ok()) {
+            writeln!(log_file, "{line}").ok();
         }
     }
 
@@ -229,12 +273,15 @@ fn run_agent_turn(
     let status = child.wait().map_err(|e| Error::io("wait", e))?;
     let exit_code = status.code().unwrap_or(-1);
 
-    write_log_event(&mut log_file, &serde_json::json!({
-        "type": "kerrigan",
-        "event": "agent_exit",
-        "exit_code": exit_code,
-        "ts": now_iso(),
-    }));
+    write_log_event(
+        &mut log_file,
+        &serde_json::json!({
+            "type": "kerrigan",
+            "event": "agent_exit",
+            "exit_code": exit_code,
+            "ts": now_iso(),
+        }),
+    );
 
     // Re-open task engine to see agent's updates
     let task_dir = registry.task_dir(&task_id);
@@ -244,12 +291,15 @@ fn run_agent_turn(
     match (node.status, exit_code) {
         // Agent updated to terminal — done
         (NodeStatus::Succeeded, _) | (NodeStatus::Failed, _) => {
-            write_log_event(&mut log_file, &serde_json::json!({
-                "type": "kerrigan",
-                "event": "exec_end",
-                "node_status": format!("{:?}", node.status).to_lowercase(),
-                "ts": now_iso(),
-            }));
+            write_log_event(
+                &mut log_file,
+                &serde_json::json!({
+                    "type": "kerrigan",
+                    "event": "exec_end",
+                    "node_status": format!("{:?}", node.status).to_lowercase(),
+                    "ts": now_iso(),
+                }),
+            );
             // Update process record
             if let Some(proc) = task_engine.process_get_by_node(node_id)? {
                 task_engine.process_mark_exited(proc.id, exit_code)?;
@@ -257,11 +307,14 @@ fn run_agent_turn(
         }
         // Normal exit, still Running — turn complete, check queue
         (NodeStatus::Running, 0) => {
-            write_log_event(&mut log_file, &serde_json::json!({
-                "type": "kerrigan",
-                "event": "turn_complete",
-                "ts": now_iso(),
-            }));
+            write_log_event(
+                &mut log_file,
+                &serde_json::json!({
+                    "type": "kerrigan",
+                    "event": "turn_complete",
+                    "ts": now_iso(),
+                }),
+            );
         }
         // Crashed
         (NodeStatus::Running, code) => {
@@ -274,13 +327,16 @@ fn run_agent_turn(
                     ..Default::default()
                 }),
             }])?;
-            write_log_event(&mut log_file, &serde_json::json!({
-                "type": "kerrigan",
-                "event": "exec_end",
-                "node_status": "failed",
-                "reason": reason,
-                "ts": now_iso(),
-            }));
+            write_log_event(
+                &mut log_file,
+                &serde_json::json!({
+                    "type": "kerrigan",
+                    "event": "exec_end",
+                    "node_status": "failed",
+                    "reason": reason,
+                    "ts": now_iso(),
+                }),
+            );
             if let Some(proc) = task_engine.process_get_by_node(node_id)? {
                 task_engine.process_mark_exited(proc.id, code)?;
             }
@@ -313,7 +369,14 @@ fn drain_message_queue(
 
         // Check queue
         if let Some(msg) = te.message_consume(node_id)? {
-            run_agent_turn(&te, node_id, adapter, session_id, Some(&msg.content), log_path)?;
+            run_agent_turn(
+                &te,
+                node_id,
+                adapter,
+                session_id,
+                Some(&msg.content),
+                log_path,
+            )?;
         } else {
             break; // No messages — exit, wait for send to wake us
         }
@@ -326,10 +389,10 @@ fn find_task_id_for_node(registry: &RegistryEngine, node_id: &str) -> Result<Str
     let tasks = registry.task_list()?;
     for task in &tasks {
         let task_dir = registry.task_dir(&task.id);
-        if let Ok(te) = TaskEngine::open(&task_dir) {
-            if te.get_node(node_id).is_ok() {
-                return Ok(task.id.clone());
-            }
+        if let Ok(te) = TaskEngine::open(&task_dir)
+            && te.get_node(node_id).is_ok()
+        {
+            return Ok(task.id.clone());
         }
     }
     Err(Error::NodeNotFound(node_id.to_string()))

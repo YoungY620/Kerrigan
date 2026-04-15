@@ -53,17 +53,20 @@ pub fn run(node_id: &str, message: &str, interrupt: bool) -> Result<()> {
         }
     } else {
         // No running exec — fork a new one to consume the queue
-        let proc_entry = proc.as_ref().ok_or_else(|| {
-            Error::ProcessNotFound(node_id.to_string())
-        })?;
+        let proc_entry = proc
+            .as_ref()
+            .ok_or_else(|| Error::ProcessNotFound(node_id.to_string()))?;
 
         let exe = std::env::current_exe().map_err(|e| Error::io("current_exe", e))?;
         Command::new(exe)
             .args([
                 "exec",
-                "--task", &task_id,
-                "--node", node_id,
-                "--adapter", &proc_entry.adapter,
+                "--task",
+                &task_id,
+                "--node",
+                node_id,
+                "--adapter",
+                &proc_entry.adapter,
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -79,7 +82,7 @@ pub fn run(node_id: &str, message: &str, interrupt: bool) -> Result<()> {
         exec_running,
         action,
     };
-    println!("{}", serde_json::to_string(&result).unwrap());
+    crate::output::output_json(&result);
     Ok(())
 }
 
@@ -87,10 +90,10 @@ fn find_task_for_node(registry: &RegistryEngine, node_id: &str) -> Result<String
     let tasks = registry.task_list()?;
     for task in &tasks {
         let task_dir = registry.task_dir(&task.id);
-        if let Ok(te) = TaskEngine::open(&task_dir) {
-            if te.get_node(node_id).is_ok() {
-                return Ok(task.id.clone());
-            }
+        if let Ok(te) = TaskEngine::open(&task_dir)
+            && te.get_node(node_id).is_ok()
+        {
+            return Ok(task.id.clone());
         }
     }
     Err(Error::NodeNotFound(node_id.to_string()))

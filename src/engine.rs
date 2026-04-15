@@ -201,11 +201,7 @@ impl TaskEngine {
             let all_succeeded: bool = stmt
                 .query_row(dep_refs.as_slice(), |r| r.get(0))
                 .map_err(|e| Error::Db(format!("add_node status: {e}")))?;
-            if all_succeeded {
-                "ready"
-            } else {
-                "pending"
-            }
+            if all_succeeded { "ready" } else { "pending" }
         };
 
         tx.execute(
@@ -506,10 +502,7 @@ impl TaskEngine {
                     vec![Box::new(status.to_string()) as Box<dyn rusqlite::types::ToSql>],
                 )
             } else {
-                (
-                    "SELECT id, summary, status FROM nodes".to_string(),
-                    vec![],
-                )
+                ("SELECT id, summary, status FROM nodes".to_string(), vec![])
             };
 
         let mut stmt = self

@@ -2,22 +2,34 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("not initialized: run `kerrigan init` first")]
+    #[error(
+        "not initialized: run 'kerrigan init' to create ~/.kerrigan/ directory structure before using any other commands"
+    )]
     NotInitialized,
 
-    #[error("task not found: {0}")]
+    #[error(
+        "task not found: '{0}'. Use 'kerrigan task list' to see available tasks. Create one with 'kerrigan task create --summary \"...\" --workdir <path>'"
+    )]
     TaskNotFound(String),
 
-    #[error("node not found: {0}")]
+    #[error(
+        "node not found: '{0}'. Use 'kerrigan dag list --task <task-id>' to see all nodes, or 'kerrigan dag ready --task <task-id>' for executable nodes"
+    )]
     NodeNotFound(String),
 
-    #[error("duplicate node id: {0}")]
+    #[error(
+        "duplicate node id: '{0}'. Node IDs are auto-generated UUIDs — this indicates a collision or race condition. Retry the operation"
+    )]
     DuplicateNodeId(String),
 
-    #[error("adding node would create a cycle")]
+    #[error(
+        "adding node would create a cycle in the DAG. Check the --depends-on list: a node cannot depend (directly or transitively) on itself. Use 'kerrigan dag list --task <task-id>' to inspect the current dependency graph"
+    )]
     CycleDetected,
 
-    #[error("invalid state transition: {from:?} -> {to:?} for node {node_id}")]
+    #[error(
+        "invalid state transition for node '{node_id}': {from:?} -> {to:?}. Valid flow: pending->ready (automatic when predecessors succeed), ready->running (set by exec), running->succeeded/failed (set by dag update). Check current status with 'kerrigan dag get --task <task-id> --node {node_id}'"
+    )]
     InvalidStateTransition {
         node_id: String,
         from: crate::model::NodeStatus,
@@ -30,7 +42,9 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("json error at {path}: {source}")]
+    #[error(
+        "json parse error at {path}: {source}. For 'dag update', the expected input format is: '[{{\"id\":\"<node-id>\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"...\"}}}}]'"
+    )]
     Json {
         path: PathBuf,
         source: serde_json::Error,
@@ -39,10 +53,14 @@ pub enum Error {
     #[error("database error: {0}")]
     Db(String),
 
-    #[error("process not found for node: {0}")]
+    #[error(
+        "no process record found for node '{0}'. The node may not have been executed yet. Start execution with 'kerrigan exec --task <task-id> --node {0}'"
+    )]
     ProcessNotFound(String),
 
-    #[error("node has active process (pid {pid})")]
+    #[error(
+        "node already has an active process running (pid {pid}). Stop it with 'kerrigan stop --node <node-id>' before starting a new execution, or send a message with 'kerrigan send --node <node-id> --message \"...\"'"
+    )]
     NodeBusy { pid: u32 },
 }
 

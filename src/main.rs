@@ -2,7 +2,7 @@ mod cli;
 
 use clap::Parser;
 use cli::{Cli, Command, DagCommand, TaskCommand};
-use kerrigan::{NewNode, NodeUpdate, RegistryEngine, TaskEngine};
+use kerrigan::{NewNode, NodeUpdate, RegistryEngine, TaskEngine, output_json};
 use std::io::Read;
 use std::process;
 
@@ -10,10 +10,10 @@ fn find_task_for_node(registry: &RegistryEngine, node_id: &str) -> kerrigan::Res
     let tasks = registry.task_list()?;
     for task in &tasks {
         let task_dir = registry.task_dir(&task.id);
-        if let Ok(te) = TaskEngine::open(&task_dir) {
-            if te.get_node(node_id).is_ok() {
-                return Ok(task.id.clone());
-            }
+        if let Ok(te) = TaskEngine::open(&task_dir)
+            && te.get_node(node_id).is_ok()
+        {
+            return Ok(task.id.clone());
         }
     }
     Err(kerrigan::Error::NodeNotFound(node_id.to_string()))
@@ -33,7 +33,7 @@ fn run(command: Command) -> kerrigan::Result<()> {
         Command::Init => {
             let reg = RegistryEngine::default_root()?;
             reg.init()?;
-            println!("{{\"ok\":true}}");
+            output_json(serde_json::json!({"ok": true}));
         }
 
         Command::Task(sub) => {
@@ -42,11 +42,11 @@ fn run(command: Command) -> kerrigan::Result<()> {
                 TaskCommand::Create { summary, workdir } => {
                     reg.init()?;
                     let id = reg.task_create(&summary, &workdir)?;
-                    println!("{}", serde_json::json!({"task_id": id}));
+                    output_json(serde_json::json!({"task_id": id}));
                 }
                 TaskCommand::List => {
                     let tasks = reg.task_list()?;
-                    println!("{}", serde_json::to_string_pretty(&tasks).unwrap());
+                    output_json(&tasks);
                 }
             }
         }
@@ -71,25 +71,25 @@ fn run(command: Command) -> kerrigan::Result<()> {
                         },
                         deps,
                     )?;
-                    println!("{}", serde_json::json!({"node_id": id}));
+                    output_json(serde_json::json!({"node_id": id}));
                 }
                 DagCommand::List { task } => {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
                     let nodes = te.list_all()?;
-                    println!("{}", serde_json::to_string_pretty(&nodes).unwrap());
+                    output_json(&nodes);
                 }
                 DagCommand::Ready { task } => {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
                     let nodes = te.list_ready()?;
-                    println!("{}", serde_json::to_string_pretty(&nodes).unwrap());
+                    output_json(&nodes);
                 }
                 DagCommand::Get { task, node } => {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
                     let n = te.get_node(&node)?;
-                    println!("{}", serde_json::to_string_pretty(&n).unwrap());
+                    output_json(&n);
                 }
                 DagCommand::Update { task, input } => {
                     let json = match input {
@@ -107,7 +107,7 @@ fn run(command: Command) -> kerrigan::Result<()> {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
                     te.update_nodes(updates)?;
-                    println!("{{\"ok\":true}}");
+                    output_json(serde_json::json!({"ok": true}));
                 }
             }
         }
@@ -118,10 +118,10 @@ fn run(command: Command) -> kerrigan::Result<()> {
                 let task_dir = reg.task_dir(&id);
                 let te = kerrigan::TaskEngine::open(&task_dir)?;
                 let nodes = te.list_all()?;
-                println!("{}", serde_json::to_string_pretty(&nodes).unwrap());
+                output_json(&nodes);
             } else {
                 let tasks = reg.task_list()?;
-                println!("{}", serde_json::to_string_pretty(&tasks).unwrap());
+                output_json(&tasks);
             }
         }
 
@@ -152,12 +152,14 @@ fn run(command: Command) -> kerrigan::Result<()> {
                         libc::kill(proc.pid as i32, libc::SIGTERM);
                     }
                     te.process_mark_killed(proc.id)?;
-                    println!("{}", serde_json::json!({"stopped": true, "pid": proc.pid}));
+                    output_json(serde_json::json!({"stopped": true, "pid": proc.pid}));
                 } else {
-                    println!("{}", serde_json::json!({"stopped": false, "reason": "no running process"}));
+                    output_json(
+                        serde_json::json!({"stopped": false, "reason": "no running process"}),
+                    );
                 }
             } else {
-                println!("{}", serde_json::json!({"stopped": false, "reason": "no process found"}));
+                output_json(serde_json::json!({"stopped": false, "reason": "no process found"}));
             }
         }
         Command::Watch { task_id, interval } => {

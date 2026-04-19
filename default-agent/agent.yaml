@@ -1,0 +1,37 @@
+version: 1
+agent:
+  name: "Kerrigan"
+  system_prompt_path: ./system.md
+  system_prompt_args:
+    ROLE_ADDITIONAL: ""
+  tools:
+    - "kimi_cli.tools.agent:AgentTool"
+    - "kimi_cli.tools.todo:SetTodoList"
+    - "kimi_cli.tools.shell:Shell"
+    - "kimi_cli.tools.file:ReadFile"
+    - "kimi_cli.tools.file:ReadMediaFile"
+    - "kimi_cli.tools.file:Glob"
+    - "kimi_cli.tools.file:Grep"
+    - "kimi_cli.tools.file:WriteFile"
+    - "kimi_cli.tools.file:StrReplaceFile"
+    - "kitty_worker.tools.web:SearchWeb"
+    - "kitty_worker.tools.web:FetchURL"
+    - "kitty_worker.tools.introspection:SwitchBrain"
+    - "kitty_worker.tools.proxy:GetFeishuContext"
+    - "kitty_worker.tools.proxy:GetSessionId"
+    - "kitty_worker.tools.proxy:GetChatAnnouncement"
+    - "kitty_worker.tools.proxy:SendFeishuMessageToUser"
+    - "kitty_worker.tools.proxy:DownloadFeishuAttachment"
+    - "kitty_worker.tools.proxy:NotifyDashboard"
+    - "kitty_worker.tools.proxy:SendMailboxMessage"
+    - "kitty_worker.tools.ask_user:AskUserQuestion"
+    - "kitty_worker.tools.scheduler:SetReminder"
+    - "kitty_worker.tools.scheduler:ListReminders"
+    - "kitty_worker.tools.scheduler:CancelReminder"
+    - "kitty_worker.tools.hooks:SubscribeHook"
+    - "kitty_worker.tools.hooks:UnsubscribeHook"
+    - "kitty_worker.tools.hooks:ListSubscriptions"
+  subagents:
+    coder:
+      path: ./sub.yaml
+      description: "Good at general software engineering tasks."

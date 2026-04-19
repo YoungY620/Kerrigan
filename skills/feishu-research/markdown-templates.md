@@ -14,13 +14,14 @@
 
 ## 模板 1:话题详细文档 (`./topics/{X}.md`)
 
-每个 `topic-X-investigation` 节点产出,**完整、详尽**。章节选择按话题调研类型决定(工具/代码/新闻/观点/研究),非该类型的章节省略。
+每个 `topic-X-investigation` 节点产出,**完整、详尽**。章节选择按话题命中的 Types 和 hands-on 标签决定(见 `SKILL.md` Phase 7.2.a 表),未命中对应类型的章节省略。
 
 ```markdown
 # {话题名称}
 
 **来源**: 群 A (2026-04-18 14:30–15:10), 群 B (2026-04-18 15:05–15:45)
-**类型**: 工具 + 新闻
+**Types**: tool-or-code + event
+**hands-on**: hands-on-available
 
 ## 讨论还原
 (2-4 段,提炼讨论脉络,不是 message 级堆砌)
@@ -52,7 +53,7 @@
 
 完整日志 ≥ 2000 字 → [话题 1 · 实验日志全文 →](feishu_url_grandchild)
 
-## 多源交叉验证(若为新闻类)
+## 多源交叉验证(命中 event 时)
 ...
 
 ## 原文索引
@@ -73,13 +74,15 @@ Stage 4a 产出,**简洁、指路型**,每话题章节 ≤ 10 行(不含 1 张�
 - 覆盖群: 群 A (oc_xxx), 群 B (oc_yyy), ...
 - 时间窗: 2026-04-18 09:00 – 18:00
 - 提取话题: N 个
-- 调研类型分布: 工具 X / 代码 Y / 新闻 Z / 观点 W / 研究 V
+- Types 分布: tool-or-code X / event Y / opinion Z / incident W / team-ops V / social U
+- hands-on: N 个话题 hands-on-available, M 个 read-only
 - 上一期: [2026-04-17 调研](https://xxx.feishu.cn/docx/<prev_doc_id>)
 
 # {话题 1}
 
 **来源**: 群 A (14:30–15:10), 群 B (15:05–15:45)
-**类型**: 工具 + 新闻
+**Types**: tool-or-code + event
+**hands-on**: hands-on-available
 **核心结论**: 一句话结论(如 "Redis 8 在本机压测下对 KeyDB 有 ~25% QPS 优势")
 
 ![key-chart](./figs/topic1-perf.png)
@@ -99,7 +102,7 @@ Stage 4a 产出,**简洁、指路型**,每话题章节 ≤ 10 行(不含 1 张�
 
 ## 使用提醒
 
-- 两份模板只是最常见的**章节组合**,话题调研类型不同(tool/code/news/opinion/research 及其组合)时,照 `SKILL.md` Phase 6 的对应协议调整章节 —— 没有实验的话题不要硬塞"实验环境/步骤"空章节
+- 两份模板只是最常见的**章节组合**。命中的 Types 不同(tool-or-code / event / opinion / incident / team-ops / social 及其组合)时,照 `SKILL.md` Phase 7.2.a 的章节表增减。没有 `verify-*` 产出的话题不要硬塞"实验环境/步骤"空章节
 - 图片路径必须是工作目录下**相对路径**,PNG/JPG 放 `./figs/`
 - 所有 `[text](https://xxx.feishu.cn/docx/...)` 必须保留为 inline link,Stage 4b 的流水线会渲染成可点击
 - 写完 md 后,按 `SKILL.md` Phase 7.3 的流水线转飞书文档,不要自己另写转换逻辑

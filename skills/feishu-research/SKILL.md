@@ -10,7 +10,7 @@ description: >
 
 # Feishu Research
 
-用 Kerrigan DAG 把"帮我调研一下最近几个群的聊天内容"这类请求,跑成一条**多群并行分析 → 跨群话题提取 → 按调研类型派生子任务簇 → 飞书父子文档网络**的可执行任务链。
+用 Kerrigan DAG 把"帮我调研一下最近几个群的聊天内容"这类请求,跑成一条**多群并行分析 → 跨群话题提取 → 按Types派生子任务簇 → 飞书父子文档网络**的可执行任务链。
 
 > **前置依赖**:`kerrigan` skill 是本 skill 的前置依赖 —— 开始执行本 skill 前**必须先完整阅读** `kerrigan` skill 的所有指导文件。本 skill 假设你已经掌握 Kerrigan 的执行流程、节点粒度、依赖原则和通用调研方法论,不再重复这些内容,只讲"多群聊调研"这个场景如何落到 Kerrigan DAG 上。
 
@@ -88,7 +88,7 @@ description: >
 │  cross-group-topic-extraction                 │
 │  依赖: 所有 Stage 1 节点                      │
 │  输出: 话题清单 (名称 / 涉及群 / 时间跨度 /    │
-│         message_id 索引 / 初判调研类型)       │
+│         message_id 索引 / Types + hands-on)   │
 └─────────────────┬─────────────────────────────┘
                   ▼
 ┌── Stage 3 · 每话题独立调研 (动态派生) ────────┐
@@ -111,7 +111,7 @@ description: >
 └───────────────────────────────────────────────┘
 ```
 
-**Stage 3 的动态派生**是核心:Kerrigan 执行 Stage 2 **之前不知道话题是什么**,Stage 2 产出话题清单后,agent 才能根据清单给每个话题 `kerrigan add` 一个 `topic-X-investigation` 节点;这些节点内部再按调研类型继续派生子节点簇。这是 `guide.md` "Execute First, Decompose Later" 原则的典型应用。
+**Stage 3 的动态派生**是核心:Kerrigan 执行 Stage 2 **之前不知道话题是什么**,Stage 2 产出话题清单后,agent 才能根据清单给每个话题 `kerrigan add` 一个 `topic-X-investigation` 节点;这些节点内部再按Types继续派生子节点簇。这是 `guide.md` "Execute First, Decompose Later" 原则的典型应用。
 
 ---
 
@@ -155,7 +155,8 @@ description: >
   - `涉及群`:至少 1 个,跨群讨论时列多个
   - `时间跨度`:每个涉及群的起止时间
   - `message_id 索引`:指向该话题最代表性的 3-10 条消息
-  - `初判调研类型`:从 **tool / code / news / opinion / research** 中选 1 个或多个
+  - `初判 Types`:从 **tool-or-code / event / opinion / incident / team-ops / social** 中命中的所有类型(可多选)
+  - `hands-on 标签`:`hands-on-available` 或 `read-only`(默认 hands-on-available,除非明确无法写代码验证)
   - `简要讨论摘要`:2-3 句
 - **粒度**见 Phase 5
 - **Output (result_summary)**:话题数量 / 每话题一行概要 / 清单文件路径
@@ -171,9 +172,9 @@ description: >
 - **Objective**:对话题 `{X}` 产出(a) `./topics/{X}.md` 详细 markdown,(b) 飞书详细子文档(挂在主文档 parent_token 下)
 - **Context**:依赖 `cross-group-topic-extraction` + 话题涉及的 `group-*-analysis` 节点
 - **执行步骤**:
-  1. 读 Stage 2 给出的初判类型(tool / code / news / opinion / research)
-  2. **对每个类型,按 Phase 6 对应协议派生一簇子节点**(`kerrigan add`)
-  3. 等所有子节点完成(失败降级策略见 7.6)
+  1. 读 Stage 2 给出的 Types 列表和 hands-on 标签
+  2. **每个命中的 Type 派生对应子节点簇(§6.1–6.6);hands-on-available 时额外派生 `verify-*` 簇,包括强制的 `verify-quality-check` 终节点(§6.7)**(`kerrigan add`)
+  3. 等所有子节点完成(失败处理见 §6.7 "暴露 > 降级" 原则)。**`verify-quality-check` 未通过时**:首选修复后重跑;次选**保留实验章节并显式标注失败**(不降级藏问题);仅在环境根本不具备时才真正降级为 read-only 并删除实验章节
   4. 读所有子节点 result_summary,合成 `./topics/{X}.md`(结构见 7.2.a)
   5. 调用 7.3 的"md → 飞书"流水线建立**话题详细子文档**(parent_token = 主文档 token)
   6. 若原文/日志超长,按 7.0 触发条件继续派生孙子文档
@@ -213,7 +214,7 @@ description: >
 
 - **Stage 1 独立**:各群分析零耦合,保证 agent 不会被"先看了 A 群"而带偏"B 群的判断"。对应 `guide-research.md` 的多视角独立采集
 - **Stage 2 聚合**:话题是**涌现**的,不是消息级的。必须全局扫一遍才能发现"群 A 下午在聊 Redis 8,群 B 晚上也在聊"——这种跨群共性只有全量视角才看得见
-- **Stage 3 深度**:聊天本身是线索,不是结论。话题识别后必须按**调研类型**走协议,让结论可追溯、可复现、可挑战
+- **Stage 3 深度**:聊天本身是线索,不是结论。话题识别后必须按**命中的 Types + hands-on 标签**派生对应子节点簇,让结论可追溯、可复现、可挑战
 - **Stage 4 编辑**:调研过程的 result_summary 是工作底稿,不是读者想看的东西。必须有一个"编辑"角色通读所有话题再重写
 
 ### 3.2 依赖关系 = 信息需求
@@ -228,7 +229,7 @@ description: >
 
 **第二轮派生(Stage 2 完成后)**:Stage 2 输出话题清单,agent 立刻为每个话题 `kerrigan add` 一个 `topic-X-investigation`,依赖列表 = `[cross-group-topic-extraction, 涉及的 group-*-analysis]`
 
-**第三轮派生(Stage 3 编排节点启动后)**:agent 读话题元数据中的"初判调研类型",对每个类型调用 Phase 6 的对应模板派生一簇子节点。这一轮派生**完全在 topic-X-investigation 内部执行**,不影响其他话题。
+**第三轮派生(Stage 3 编排节点启动后)**:agent 读话题元数据中的 Types 和 hands-on 标签,对每个命中的 Type 派生 §6.1–6.6 对应子节点簇;hands-on-available 时再派生 `verify-*` 簇(§6.7)。这一轮派生**完全在 topic-X-investigation 内部执行**,不影响其他话题。
 
 **禁止提前派生**:不要在 Stage 1 还没跑完时就猜测话题、预建 Stage 3 节点。Kerrigan 能力是动态扩展,不是预测性规划。
 
@@ -253,7 +254,10 @@ description: >
 - 个人状态("请假"、"到了"、"下班")
 - 重复的"早上好""晚安"
 
-**保留边界**:带情绪但含信号的要留 —— "这个 API 又崩了,已经是这周第三次"是稳定性抱怨,有信号。
+**保留边界**:
+- 带情绪但含技术信号的留("这 API 又崩了,这周第三次" —— 稳定性抱怨有信号)
+- 非工作内容达 social 阈值(§5.2)时不过滤,升格为 social 话题
+- 团队内务(会议/团建/工作安排)零散几条也不过滤,归 team-ops
 
 ### 4.2 技术讨论识别(强制保留)
 
@@ -299,19 +303,48 @@ description: >
 - 同群同话题的连续消息聚为一条讨论段;跨群的相似讨论合并为一个话题,但各群时间跨度分别列出
 - 单条"随口一提"不够成话题 —— **话题至少要有 3 条以上的消息支撑**,或一张有信息量的图片
 
-### 5.2 调研类型初判
+### 5.2 话题标注:Types(多选)+ hands-on 标签(独立)
 
-按以下规则初判 `调研类型`(可多选):
+每个话题打两组标,两组**正交**。
 
-| 信号 | 归入类型 |
+#### Types(可多选,≥1 个)
+
+| 信号 | Type |
 |---|---|
-| 提及具体工具名 + repo/官网 + 使用场景 | tool |
-| 提及代码片段、PR、commit、具体函数/模块实现 | code |
-| 提及发布事件、版本更新、公司动态、价格/政策变化 | news |
-| 参与者就选型 / 趋势 / 价值判断有不同立场 | opinion |
-| 提及论文名、arxiv ID、学术概念、算法 | research |
+| 讨论具体工具/框架/库/repo/PR/commit/源码(含论文 + 开源实现) | **tool-or-code** |
+| 外部世界的新闻/版本/厂商/行业动态/价格政策变化 | **event** |
+| 参与者有**明显不同立场**的选型/趋势/价值讨论 | **opinion** |
+| bug/报错/prod 异常/服务故障/性能退化("坏了,要查") | **incident** |
+| 团队内务:团建/会议/纪要/工作规划/人事/假期/流程 | **team-ops** |
+| 非工作**集体热议**(八卦/影视/游戏/兴趣等,**必须满足阈值**) | **social** |
 
-**多类型叠加**常见:Redis 8 发布 = tool + news;某 paper 开源实现评测 = research + code + tool。在 Stage 3 要**同时**跑所有命中类型的协议。
+**每类独立判断是否命中,可同时命中多个**。同时命中即**分别**派生对应子节点簇(§6)。
+
+**social 阈值**(未达阈值按 §4.1 丢弃):消息 ≥20 条 + 持续 ≥30 分钟或占时段比例 ≥30% + 参与人数 ≥3。
+
+#### hands-on 标签(独立于 Types)
+
+**默认倾向是动手**——能写代码验证就写,不要停在"读了就算"。
+
+- `hands-on-available` —— **默认**标签,只要能通过写代码/脚本/API 调用做验证就打这个。路径包括:沙盒跑代码 / 公开可试用工具 / 飞书 API 交叉验证 / 本地 Python 脚本测试 / Docker benchmark / 论文开源实现复现
+- `read-only` —— **退化标签**,只在确实无法写代码验证时用:闭源且无试用 / 付费且无试用 / 数据不可得 / 沙盒环境缺失 / 无公开实现
+
+hands-on-available 会额外派生 `verify-*` 子簇(§6.7),与命中的 Types 独立叠加。**判断原则**:有一丝"能写脚本验证"的可能就标 hands-on-available,让 agent 在 `verify-design` 节点里评估可行性;别提前自我设限为 read-only。
+
+#### 示例
+
+| 话题 | Types | hands-on |
+|---|---|---|
+| Redis 8 vs KeyDB 压测 | tool-or-code + event | ✅ |
+| LLM 公司限流新闻 | event | ❌ |
+| 新产品发布想实测 | event | ✅ |
+| 群里聊某实用工具(社交热议) | social + tool-or-code | ✅ |
+| 某综艺 80 条集体吐槽 | social | ❌ |
+| Rust vs Go 争论 | opinion | ❌ |
+| prod OOM 复盘 | incident(+ opinion 若方案分歧) | ✅ |
+| 团建/OKR | team-ops | ❌ |
+| arxiv paper(有开源) | tool-or-code(+ event 若追溯引用) | ✅ |
+| 中午午饭讨论 5 条 | — | — | → 按 §4.1 过滤 |
 
 ### 5.3 话题粒度
 
@@ -323,146 +356,140 @@ description: >
 
 ---
 
-## Phase 6 — 五种调研类型:每类**派生一簇子任务节点**
+## Phase 6 — 子节点簇:按 Types 和 hands-on 标签派生
 
-**关键原则**:归入某类型时,派生的**不是一个"xxx 类调研"单点**,而是**一簇细粒度子节点**。每个子节点职责单一、可并行/可重试、独立产出 result_summary。
+**原则**:`topic-X-investigation` 是编排节点,真正的工作在它派生的子节点簇里。命中的每个 Type 派生自己的簇(§6.1–6.6);标了 hands-on-available 额外派生 `verify-*` 簇(§6.7)。所有子节点职责单一、可并行/可重试、独立产出 result_summary。
 
-`topic-X-investigation` 本身是**编排节点**,真正的工作都在它派生的子节点簇里。
+### 6.1 `tc-*` —— tool-or-code(阅读分析,不含沙盒)
 
-### 6.1 工具类(tool)
+| 子节点 | 职责 |
+|---|---|
+| `tc-{X}-fetch` (必) | `git clone` / 拿 PR diff / 定位 commit / 下载论文 / 下载文档 |
+| `tc-{X}-read` (必) | 读 README / 关键源码 / 论文方法,摘录定位、指标、竞品 |
+| `tc-{X}-static-check` | clippy/ruff/mypy/tsc 等,留"工具/版本/结果"记录,全过也要写 |
+| `tc-{X}-analyze` (必) | 综合 read + static-check,评估实现 |
 
-**归入条件**:话题提及具体工具/框架/服务,有 repo / 官网 / 安装步骤。
+沙盒跑代码/benchmark 的工作由 `verify-*` 簇(§6.7)承担,不在本簇内。
 
-**子节点簇**:
-
-| 子节点 | 职责 | 依赖 |
-|---|---|---|
-| `tool-{X}-read-repo` (必) | 读 README + 主要文档,提取定位、主打指标、声明的竞品列表 | — |
-| `tool-{X}-sandbox-setup` (必) | Docker 镜像拉取、容器启动、依赖安装、冒烟测试 | read-repo |
-| `tool-{X}-benchmark-design` (必) | 设计压测方案:工作负载、并发参数、测量周期、采集方式;参数选择理由 | read-repo |
-| `tool-{X}-benchmark-run-primary` (必) | 对主角工具压测,采集原始数据(JSON/CSV) | sandbox-setup + benchmark-design |
-| `tool-{X}-benchmark-run-competitor-{Y}` (每个竞品 1 个) | 对每个竞品跑**同样方案**,独立节点便于并行 + 重试 | sandbox-setup + benchmark-design |
-| `tool-{X}-analyze-plot` (必) | 汇总所有 benchmark 原始数据,matplotlib 绘图,写对比分析 | 所有 benchmark-run-* |
-
-**必须产出的数据**:所用镜像/硬件/版本(环境)、关键命令(步骤)、原始数据文件路径、matplotlib PNG 路径(见 6.6)。
-
-**退化**:
-- 无 Docker/VM → `sandbox-setup` 直接 fail,后续级联 fail(**禁止**主机安装)
-- 无 matplotlib 环境 → 沙盒内 `pip install`,仍禁污染主机
-- benchmark 日志 ≥ 2000 字 → 按 7.0 规则拆孙子文档
-
-### 6.2 代码类(code)
-
-**归入条件**:话题讨论具体代码片段、PR、commit、实现技巧、具体函数/模块。
-
-**子节点簇**:
-
-| 子节点 | 职责 | 依赖 |
-|---|---|---|
-| `code-{X}-fetch-sources` (必) | `git clone` / 拿 PR diff / 定位 commit,列出要分析的文件路径 | — |
-| `code-{X}-read-sources` (必) | 阅读关键代码,摘录核心逻辑和设计意图 | fetch |
-| `code-{X}-test-requirements` | 分析要验证讨论中的技术声明,需要覆盖哪些 case / 输入 / 边界 | read |
-| `code-{X}-develop-repro` | 沙盒内开发复现脚本 / benchmark / 测试用例 | test-requirements |
-| `code-{X}-static-check` | 对原代码 + 复现代码跑 static analysis(clippy/ruff/mypy/tsc 等) | fetch + develop-repro |
-| `code-{X}-run-repro` | 沙盒里跑复现/测试,收集结果(含失败用例) | develop-repro |
-| `code-{X}-analyze` | 综合 static-check + run-repro,评估实现;有数值对比则 matplotlib 绘图 | 所有前置 |
-
-**规则**:
-- 话题只是"聊某段代码写得好"**没有技术声明要验证** → 退化为只跑 fetch + read + analyze
-- 话题是"讨论某 PR 有 bug" → 必须跑到 `run-repro`,尝试触发
-- static-check 即使全过也要留记录"运行了什么工具 / 版本 / 结果"
-
-### 6.3 新闻类(news)
-
-**归入条件**:时效性强的事件、版本发布、公司动态、价格/政策变化。
-
-**子节点簇**(每个来源独立节点,**不互相读 result**):
+### 6.2 `event-*` —— 外部事件多源核实
 
 | 子节点 | 职责 | 并行 |
 |---|---|---|
-| `news-{X}-source-official` (必) | 官方博客 / release notes / 官推 / 新闻发言人声明 | ✅ |
-| `news-{X}-source-code` (必) | GitHub release / commit history / changelog | ✅ |
-| `news-{X}-source-community` (必) | HN / Reddit / Twitter / Discord 社区反应 | ✅ |
-| `news-{X}-source-media` | 二级媒体(TechCrunch / The Verge / 行业自媒体) | ✅ |
-| `news-{X}-source-counter` | **反方专采**:质疑、否认、纠错的声音 | ✅ |
-| `news-{X}-crosscheck` (必) | 读所有 source-* 的 result,识别一致/冲突/缺失,给置信度 | 依赖所有 source-* |
+| `event-{X}-source-official` (必) | 官方博客/release notes/官推/发言人声明 | ✅ |
+| `event-{X}-source-code` (必) | GitHub release/commit/changelog | ✅ |
+| `event-{X}-source-community` (必) | HN/Reddit/X/Discord 社区反应 | ✅ |
+| `event-{X}-source-media` | 二级媒体 | ✅ |
+| `event-{X}-source-counter` | 反方:质疑/否认/纠错 | ✅ |
+| `event-{X}-crosscheck` (必) | 原始时间戳 + 措辞差异表,识别一致/冲突/缺失,给置信度 | 依赖所有 source |
 
-**硬性要求**:
-- 至少 **3** 个独立 source 节点,否则 crosscheck 在 result 里标"单源,低置信"
-- source 节点之间**不读彼此 result**(避免污染)—— 这一条违反 `guide.md` 的"依赖=信息需求"默认,但在新闻调研里是必要隔离
-- crosscheck 必须给**原始时间戳 + 措辞差异**的表格,不能只给结论
-- 原文引用 ≥ 2000 字 → 按 7.0 拆孙子文档
+**硬约束**:至少 3 个独立 source(不足 3 crosscheck 标"单源低置信");source 节点间**不读彼此 result**(避免污染);原文引用 ≥2000 字拆孙子文档(§7.0)。
 
-### 6.4 观点类(opinion)
-
-**归入条件**:价值判断、技术选型争论、趋势预测。
-
-**子节点簇**:
+### 6.3 `opinion-*` —— 多立场采集
 
 | 子节点 | 职责 | 并行 |
 |---|---|---|
-| `opinion-{X}-stakeholder-{人物 A}` | 采集立场 A 代表人物的公开表达,还原**核心论据**(不是 slogan) | ✅ |
-| `opinion-{X}-stakeholder-{人物 B}` | 立场 B 代表人物 | ✅ |
-| `opinion-{X}-stakeholder-{人物 C}` | 立场 C 代表人物 | ✅ |
-| `opinion-{X}-context-survey` | 历史背景 / 前情 / 为何会有分歧 | ✅ |
-| `opinion-{X}-synthesize` (必) | 读所有 stakeholder + context,做立场矩阵 + 共识/分歧识别 | 所有前置 |
+| `opinion-{X}-stakeholder-{A/B/C}` | 每人一节点,采集**核心论据**(不是 slogan),不掺作者评价 | ✅ |
+| `opinion-{X}-context-survey` | 历史背景/为何分歧 | ✅ |
+| `opinion-{X}-synthesize` (必) | 立场矩阵 + 共识/分歧;**不**强判谁对 | 依赖前置 |
 
-**硬性要求**:
-- 至少 **3** 个 stakeholder,代表**不同立场**(不是同立场的 3 人)
-- 每个 stakeholder 节点**只采一人/一方**,不掺作者评价
-- synthesize **不**强行得出"谁对",只做立场矩阵 + 论据点评
+**硬约束**:至少 3 个 stakeholder 且代表**不同**立场。
 
-### 6.5 研究类(research)
+### 6.4 `incident-*` —— 故障诊断
 
-**归入条件**:论文、实验、学术概念、算法。
+| 子节点 | 职责 |
+|---|---|
+| `incident-{X}-symptom-collect` (必) | 时间线 / 报错 message / 影响范围 / 触发条件 |
+| `incident-{X}-hypothesis-generate` (必) | 根因假设按可能性排序 |
+| `incident-{X}-root-cause-analysis` (必) | 指向具体代码/配置/外部因素 |
+| `incident-{X}-fix-review` | 评估已讨论/已实施的修复方案 + 回归测试建议 |
 
-**子节点簇**:
+沙盒复现由 `verify-*` 簇承担。无 hands-on 时 `root-cause-analysis` 必须标"未复现,基于推理"。
 
-| 子节点 | 职责 | 依赖 |
-|---|---|---|
-| `research-{X}-paper-fetch` (必) | arxiv / 会议 / tech report 找原文,下载 PDF,摘录 abstract | — |
-| `research-{X}-methodology-review` (必) | 核查方法:数据集 / 基线 / 指标 / 可复现声明 / 局限 | paper-fetch |
-| `research-{X}-citation-trace` (必) | 后续引用追踪:是否有工作证实/推翻 | paper-fetch |
-| `research-{X}-repro-design` | 若有官方代码,设计复现方案 | methodology-review |
-| `research-{X}-repro-run` | 沙盒里跑复现,采集数据(环境/步骤同 6.6) | repro-design |
-| `research-{X}-synthesize` (必) | 综合所有前置,给结论 | 所有前置 |
+### 6.5 `team-ops-*` —— 团队内务记录
 
-**规则**:
-- 无代码可复现 → 跳过 repro-design / repro-run
-- 复现涉及指标对比(paper claim vs 复现值 vs baseline) → matplotlib 绘图是硬要求
-- 引用追踪 < 5 篇 → result 里标"引用不足,证据有限"
+**不做调研,只做记录 + 行动项提取**。
 
-### 6.6 实验操作的记录规范(工具/代码/研究类通用)
+| 子节点 | 职责 |
+|---|---|
+| `team-ops-{X}-extract-facts` (必) | 时间/参与者/地点/主题/背景 |
+| `team-ops-{X}-extract-decisions` (必) | who/what/when;无决策如实写"仅通知" |
+| `team-ops-{X}-extract-action-items` (必) | todo,每条必含**责任人 + 期限**;无则写"无待办" |
+| `team-ops-{X}-synthesize` (必) | 合成备忘 |
 
-凡是通过 Kerrigan 节点**实际下载 / 安装 / 运行 / 测试**的场景,result_summary 和最终报告**必须**包含两块:
+**红线**:人事评价/薪酬/个人八卦一律**不进主报告**;涉及时 result_summary 写"含敏感内容,已剔除"。**不做**外部核实、不做沙盒、不跨群聚合(除非明确跨组会议)。
 
-#### ① 实验环境
+### 6.6 `social-*` —— 集体热议情绪记录
 
-- **沙盒类型**:Docker 镜像 + tag(如 `ubuntu:24.04`)/ VM 型号
-- **硬件**:CPU(如 `Apple M2 Pro`)/ RAM / GPU(如有)/ 网络(带宽敏感测试)
-- **关键软件版本**:主工具 + 依赖 + 数据集版本(如 `redis 8.0.0` / `wrk 4.2.0`)
-- **资源限制**:实际 `docker run --cpus 4 --memory 8g` 等 flag
+**不做调研,只做主题 + 热度 + 情绪记录**。必须满足 §5.2 的 social 阈值才成话题。
 
-#### ② 实验步骤简述(5-10 步,人读的那种)
+| 子节点 | 职责 |
+|---|---|
+| `social-{X}-extract-theme` (必) | 具体主题(哪部剧/哪个明星公开事件/哪个游戏) |
+| `social-{X}-gauge-heat` (必) | 消息数/人数/时长 + 代表性原文 2-3 条 |
+| `social-{X}-synthesize` (必) | 一段话情绪/倾向总结;**不**多源核实、**不**价值判断 |
+
+**红线**:只记公开娱乐内容;涉及具体同事/同行/第三方个人的八卦一律**不展开**,主报告仅一句"群内有 personal 讨论,已因隐私未展开"。在最终报告里**不单独 H1**,统一放末尾 `# 群内非工作热议` 段落下每话题一段。
+
+### 6.7 `verify-*` —— 动手验证(跨 Type 通用,hands-on-available 触发)
+
+和 Types 正交。无论命中哪类 Type,只要 hands-on-available,都可以按需派生此簇;由 Types 决定验证目标。
+
+| 子节点 | 职责 |
+|---|---|
+| `verify-{X}-env-setup` (必) | Docker 镜像拉取 / VM / venv / 本地 script 准备;**禁主机安装** |
+| `verify-{X}-design` (必) | 验证方案。目标按 Types 决定:tc→benchmark;incident→最小复现;event→产品 claim 实测;social→工具试用 |
+| `verify-{X}-run-primary` (必) | 主实验,采集原始数据 |
+| `verify-{X}-run-competitor-{Y}` | 每竞品一节点跑同方案(适用于 benchmark 对比场景) |
+| `verify-{X}-analyze-plot` (必) | 汇总分析;涉及性能/数值对比必须 matplotlib 绘图 |
+| `verify-{X}-quality-check` (必,**独立 agent**) | **终节点**,独立审核上述 `verify-*` 产出是否真的做了事 |
+
+**`quality-check` 是硬性要求,不可省略**。由一个**独立 agent**(fresh session,不读其他 verify-* 节点的 result_summary 原文,只按落盘产物审核)执行。
+
+**检查清单**(每项产出 pass/fail + 证据,任一 fail 即整体 fail):
+
+1. **代码真的写了**:`./scripts/` 下存在实验脚本,非空、不是占位 `TODO` / `pass`;diff 上看是可运行代码
+2. **代码真的跑了**:工作目录下存在**执行日志**(`logs/*.log` 等),日志里有 timestamp、exit code、实际输出;Docker 场景下有 `docker ps/inspect` 足迹或容器 id
+3. **拿到了执行结果数据**:`data/` 目录下存在 benchmark 原始数据文件(JSON/CSV),大小 > 0 且字段结构合理(非空数组、非占位 sample)
+4. **图表真的绘制了**:`figs/*.png` 存在,打开能看到数据(非空白、非 placeholder);agent 应 `file figs/*.png` 确认是 PNG 且大小 > 5KB,并核对关键数字能和 `data/` 对上
+5. **报告内容真实反映实验**:`./topics/{X}.md` 里 `## 性能实测` / `## 实验步骤` 的数字必须在 `data/` 原始文件里找得到 —— **禁止**编造 / 估算 / 凑数
+
+#### 失败处理的核心原则:**暴露 > 降级**
+
+**"没有暴露问题"比"错误降级"更不可接受**。quality-check 失败时,**默认行为是保留残缺的实验记录并显式标注问题**,而不是偷偷降级成 read-only 把实验这一段藏起来。
+
+失败时的处理(按优先级):
+
+1. **首选 — 修复后重跑**:quality-check fail 后,agent 先尝试补做(补代码 / 补执行 / 补数据 / 补图表),重跑 quality-check。这是最干净的路径
+2. **次选 — 暴露失败,照常交付**:修复不了或成本太高 → **不降级为 read-only**,保留 `## 性能实测` / `## 实验步骤` 章节,但章节开头**必须**插入一段 `> ⚠️ 本节实验未通过质量验证`,列出具体失败的检查项(1-5 号哪项没过)+ 证据(缺失的 data 文件 / 空白 PNG / 数字对不上原始数据等)+ agent 做到了哪一步没做到的是什么。主报告的"事件速览表"对应行也要标 `⚠️ 实验不完整`
+3. **仅在环境根本不具备时** — env-setup 因无 Docker/VM 彻底 fail、根本没法动手 → 此时才允许降级为 read-only,且必须在话题文档开头写一行"本话题初判 hands-on-available,但环境不具备(缺 Docker),已降级为纯阅读",**禁止**在 read-only 产物里混入 `## 性能实测` / `## 实验步骤` 章节
+
+**严令禁止**:
+- 删除 `## 性能实测` / `## 实验步骤` 章节,装作本就是 read-only 话题
+- quality-check fail 后,只把失败细节写进 Kerrigan 节点 result_summary(那是工作底稿),而没同步到最终飞书文档给用户看
+- 把失败的实验"包装"成看起来完整的数据交付
+
+**飞书 API 交叉验证**同样适用:`env-setup` 准备 Python 环境 + 凭证,`design`/`run` 调 feishu client 拉数据核对;`quality-check` 审核是否真的调了 API、拿到真实响应、没用伪造数据。失败时同样走上面三档处理。
+
+### 6.8 实验操作记录规范(`verify-*` 通用)
+
+凡派生了 `verify-*` 节点,result_summary 和最终报告**必须**含两块:
+
+**① 实验环境**:沙盒类型(Docker 镜像+tag / VM)/ 硬件(CPU/RAM/GPU/网络)/ 关键版本(主工具+依赖+数据集)/ 资源限制(`--cpus --memory` 等实际 flag)
+
+**② 实验步骤**(5-10 步人读版):
 
 ```
-1. 拉镜像: docker pull xxx
-2. 启动容器: docker run ... (关键 flag 写出)
-3. 安装工具: apt-get install ... / cargo build ...
-4. 准备数据: 下载 dataset / 生成 fixture
-5. 预热: 先跑 N 秒让缓存稳定
-6. 压测: wrk -t4 -c100 -d30s http://...
-7. 采集: 从 log / prometheus / stdout 解析
-8. 竞品: 重复步骤 3-7
-9. 绘图: matplotlib 读 JSON → bar chart
-10. 清理: docker rm / docker rmi
+1. docker pull xxx
+2. docker run ... (关键 flag)
+3. 装工具 / 准备数据 / 预热
+4. 压测命令 (wrk -t4 -c100 -d30s http://...)
+5. 采集指标 (log/prom/stdout 解析)
+6. 竞品: 重复 2-5
+7. matplotlib 读 JSON → bar chart
+8. docker rm
 ```
 
-**原则**:
-- **不贴完整脚本**(太长),只写关键命令 + 参数选择理由
-- 复杂 fixture / bench 脚本另存 `./scripts/`,步骤里指向它
-- **参数选择必说明**:为什么 `-c 100` 不 `-c 1000`?为什么测 30s 不 60s?
-- 在话题详细文档里用独立 `## 实验环境` / `## 实验步骤` 子标题呈现
+**原则**:不贴完整脚本(放 `./scripts/`);参数选择必说明理由(为什么 -c 100 不 -c 1000);在话题详细文档用独立 `## 实验环境` / `## 实验步骤` 子标题呈现。
 
 ---
 
@@ -531,16 +558,18 @@ Stage 4a 的 `main-report-compose-md` 是"**编辑**"角色,不是"拼接"角色
 | 章节(H2) | 何时必有 | 内容约束 |
 |---|---|---|
 | H1 标题行 = `{话题名称}` | 始终 | 与 Stage 2 话题清单里的名称一致 |
-| 元信息(**来源**/**类型**) | 始终 | 来源列涉及群 + 该群的起止时间;类型列所有命中的调研类型 |
+| 元信息(**来源**/**Types**/**hands-on**) | 始终 | 来源列涉及群 + 起止时间;Types 列所有命中类型;hands-on 标签 |
 | `## 讨论还原` | 始终 | 2-4 段,提炼讨论脉络,**不是** message 级堆砌 |
-| `## 聊天原图` | 该话题在 Stage 1 OCR 里有保留图片 | 用 `![alt](./figs/...)` 本地相对路径嵌入所有保留的图 |
-| `## 实验环境` | 触发了 Phase 6.6(工具/代码/研究类跑了沙盒实验) | 必含字段:沙盒类型 / 硬件 / 软件版本 / 资源限制 |
+| `## 聊天原图` | Stage 1 OCR 有保留图片 | `![alt](./figs/...)` 本地相对路径 |
+| `## 实验环境` | 派生了 `verify-*` 簇 | 沙盒类型 / 硬件 / 软件版本 / 资源限制(§6.8) |
 | `## 实验步骤` | 同上 | 5-10 步简述;关键命令 + 参数选择理由;**禁贴完整脚本** |
-| `## 性能实测` | 工具类或有性能数据的代码/研究类 | matplotlib PNG 本地引用 + 对比表格 |
-| `## 多源交叉验证` | 新闻类 | 各源原始时间戳 + 措辞差异表;冲突识别 |
-| `## 立场矩阵` | 观点类 | stakeholder × 核心论据;共识 / 分歧 |
-| `## 方法学与引用` | 研究类 | 论文方法核查 + 后续引用追踪 |
-| `## 原文索引` | 始终 | `message_id` / 群 / 时间戳 / @发言人 的索引列表 |
+| `## 性能实测` | `verify-*` 产出数值对比 | matplotlib PNG + 对比表格 |
+| `## 多源交叉验证` | 命中 `event` | 各源原始时间戳 + 措辞差异表;冲突识别 |
+| `## 立场矩阵` | 命中 `opinion` | stakeholder × 核心论据;共识 / 分歧 |
+| `## 现象与根因` | 命中 `incident` | 时间线 / 报错 / 假设 → 根因(未复现时明确标注) |
+| `## 会议纪要与行动项` | 命中 `team-ops` | 决策点 / 行动项(责任人+期限)|
+| `## 情绪速记` | 命中 `social` | 主题 / 热度 / 代表性原文 2-3 条 |
+| `## 原文索引` | 始终 | `message_id` / 群 / 时间戳 / @发言人 |
 
 **超长内容处理**:任意章节实际内容超过 7.0 阈值(聊天原文 ≥ 3000 字 / 实验日志 ≥ 2000 字 / 多源引用 ≥ 2000 字)时,拆出孙子文档,本章节只留摘要 + `[完整 X →](feishu_url)` 链接。
 
@@ -551,7 +580,7 @@ Stage 4a 产出,**简洁、指路型**。
 | 章节 | 内容约束 |
 |---|---|
 | H1 标题 = `群聊调研总览 — YYYY-MM-DD` | 当日日期(本地时区) |
-| `## 概览` | 覆盖群列表 / 时间窗 / 话题数 / 调研类型分布;有前序期时加 `上一期: [日期](url)` 行(游标里的 `last_digest_doc_url`) |
+| `## 概览` | 覆盖群列表 / 时间窗 / 话题数 / Types 分布(6 类各多少个)/ hands-on 比例;有前序期时加 `上一期: [日期](url)` 行(游标里的 `last_digest_doc_url`) |
 | 每个话题一个 H1 `# {话题名}` | **≤ 10 行**(不含 1 张可选关键图);必含:来源、类型、核心结论(1 句)、跳转链接 `→ **[详见话题 X 详细文档](feishu_url)**` |
 | 末尾 H1 `# 聊天参考(未深度调研)` | 列降级话题(数据不足 / 无沙盒 / 无法归类),每条一行写明降级原因 |
 
@@ -640,7 +669,11 @@ Stage 4a 产出,**简洁、指路型**。
 
 6. **话题粒度失控**:Stage 2 产出 > 20 个话题 → 规则没 work,agent 应该合并细粒度话题。产出 < 2 个 → 原始信号稀薄,在 result 里标"可能无需本轮调研"。
 
-7. **Docker 不可用**:Phase 6 的工具/代码/研究类节点硬依赖沙盒。检测到无 Docker 时**立即 fail 该类子节点**,**不允许**降级到主机运行 —— 这是保护用户环境的红线。
+7. **Docker 不可用**:`verify-*` 簇硬依赖沙盒。检测到无 Docker 时**整个话题自动降级为 read-only**(已产出节点保留,主报告标"动手尝试失败"),**不允许**绕过沙盒到主机运行 —— 这是保护用户环境的红线。
+8. **team-ops 敏感信息**:人事评价、薪酬、个人八卦**禁止**进主报告或子文档,只在 result_summary 写"含敏感内容已剔除"。依赖飞书文档的权限控制也不算充分,源头就不写。
+9. **social 阈值滥用**:agent 容易把少量娱乐对话强行当 social 话题。只有同时满足 §5.2 三条(≥20 条 + 时长/占比 + ≥3 人)才成话题,否则按 §4.1 丢弃。
+10. **"写了代码就当跑了"**:常见失败模式是 agent 派生了 `verify-run-primary` 但只写了脚本没真正执行,或只贴了一张占位 PNG。**必须**有独立 `verify-quality-check` 按 §6.7 的 5 项清单审核。
+11. **暴露 > 降级 —— 不准藏问题**:quality-check fail 后,**默认保留实验章节 + 显式 `⚠️` 标注失败环节**,让用户看见 agent 动手了但没做完。**严令禁止**偷偷删掉实验章节、装成本就是 read-only —— 这种"看起来完整"的假交付比老实认错更严重。只有环境根本不具备(无 Docker/VM)时才允许真正降级,且必须在文档开头写明降级原因。
 
 8. **原文引用丢失**:Stage 3 话题详细文档要求标"群 + 时间 + message_id",Stage 1 必须在 raw JSON 里**完整保留** `message_id / sender / create_time / thread_id`;漏任何一项,下游无法溯源。
 
@@ -673,32 +706,34 @@ Stage 4a 产出,**简洁、指路型**。
          ▼                     ▼                          │
    Stage 3 (动态派生, 每话题 1 编排节点)                   │
    topic-redis8-investigation   topic-arxivpaper-inv.     │
+   Types: tool-or-code+event    Types: tool-or-code       │
+   hands-on: available          hands-on: available       │
          │                            │                    │
-         │ (派生 tool + news 簇)     │ (派生 research + code 簇)
-         ▼                            ▼
+         ▼                            ▼                    │
    ┌──────────────────────┐   ┌────────────────────────────┐
-   │ tool-redis8-read-repo│   │ research-paper-fetch       │
-   │ tool-redis8-sandbox  │   │ research-methodology-review│
-   │ tool-redis8-bench-   │   │ research-citation-trace    │
-   │   design             │   │ research-repro-design      │
-   │ tool-redis8-bench-   │   │ research-repro-run         │
-   │   run-primary        │   │ research-synthesize        │
-   │ tool-redis8-bench-   │   │                            │
-   │   run-competitor-    │   │ code-paper-fetch-sources   │
-   │   keydb              │   │ code-paper-read-sources    │
-   │ tool-redis8-analyze- │   │ code-paper-develop-repro   │
-   │   plot               │   │ code-paper-static-check    │
-   │                      │   │ code-paper-run-repro       │
-   │ news-redis8-source-  │   │ code-paper-analyze         │
-   │   official           │   └────────────┬───────────────┘
-   │ news-redis8-source-  │                │
-   │   code               │                │
-   │ news-redis8-source-  │                │
+   │ tc-redis8-fetch      │   │ tc-paper-fetch             │
+   │ tc-redis8-read       │   │ tc-paper-read              │
+   │ tc-redis8-static-ck  │   │ tc-paper-static-check      │
+   │ tc-redis8-analyze    │   │ tc-paper-analyze           │
+   │                      │   │                            │
+   │ event-redis8-source- │   │ verify-paper-env-setup     │
+   │   official           │   │ verify-paper-design        │
+   │ event-redis8-source- │   │ verify-paper-run-primary   │
+   │   code               │   │ verify-paper-analyze-plot  │
+   │ event-redis8-source- │   └────────────┬───────────────┘
    │   community          │                │
-   │ news-redis8-source-  │                │
-   │   counter            │                │
-   │ news-redis8-         │                │
+   │ event-redis8-        │                │
    │   crosscheck         │                │
+   │                      │                │
+   │ verify-redis8-       │                │
+   │   env-setup          │                │
+   │ verify-redis8-design │                │
+   │ verify-redis8-run-   │                │
+   │   primary            │                │
+   │ verify-redis8-run-   │                │
+   │   competitor-keydb   │                │
+   │ verify-redis8-       │                │
+   │   analyze-plot       │                │
    └──────────┬───────────┘                │
               │ (编排节点汇总,建话题详细文档) │
               ▼                             ▼
@@ -721,7 +756,7 @@ Stage 4a 产出,**简洁、指路型**。
 - 建 task 时只建 `group-A-analysis` 和 `group-B-analysis` 两个初始节点
 - Stage 1 跑完 → 建 `cross-group-topic-extraction`
 - Stage 2 跑完 → 建每个话题的 `topic-X-investigation`(编排节点)
-- 每个 `topic-X-investigation` 开跑 → 在节点内按类型派生子节点簇
+- 每个 `topic-X-investigation` 开跑 → 按 Types 派生对应簇(§6.1–6.6);hands-on-available 时额外派生 `verify-*` 簇(§6.7)
 - 所有 `topic-*-investigation` 完成 → 建 `main-report-compose-md` + `main-md-to-feishu`
 
 这是典型的"execute first, decompose later"—— 每一轮派生都基于前一轮的实际产出,**绝不提前规划超过两层依赖**。

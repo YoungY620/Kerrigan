@@ -12,7 +12,7 @@ There is no `sendMessage`, no message queue, no way to talk to another agent dir
 
 This has three consequences you must internalize:
 
-1. **Write `result_summary` for a reader who knows nothing about what you did** — not for yourself, not for the orchestrator. Downstream agents act on what you wrote; if it's incomplete, they proceed on false assumptions.
+1. **`result_summary` must expose everything downstream might need to know — especially risks, caveats, failures, and unresolved problems.** Write it for a reader who knows nothing about what you did; not for yourself, not for the orchestrator. Anything you omit — a skipped check, a shaky assumption, a partial result, a known gap — silently becomes a false assumption that downstream agents act on. When in doubt, surface it.
 2. **If you need something from another agent, you do NOT message them — you `add` a new node with the right dependency.** Any coordination need can be expressed structurally.
 3. **DAG edges = information requirements, not organizational hierarchy.** Declare a predecessor only when you genuinely need its `result_summary` to proceed. Over-declaring blocks parallelism; under-declaring causes execution on missing context.
 

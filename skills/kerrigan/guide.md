@@ -6,6 +6,20 @@ Depending on the type of your current task, you should also read the correspondi
 
 ---
 
+## Core Principle: Your result_summary IS the communication
+
+There is no `sendMessage`, no message queue, no way to talk to another agent directly. The **only** signal downstream agents receive from you is the `result_summary` you write when you complete your node (or the `failure_reason` if you fail).
+
+This has three consequences you must internalize:
+
+1. **Write `result_summary` for a reader who knows nothing about what you did** — not for yourself, not for the orchestrator. Downstream agents act on what you wrote; if it's incomplete, they proceed on false assumptions.
+2. **If you need something from another agent, you do NOT message them — you `add` a new node with the right dependency.** Any coordination need can be expressed structurally.
+3. **DAG edges = information requirements, not organizational hierarchy.** Declare a predecessor only when you genuinely need its `result_summary` to proceed. Over-declaring blocks parallelism; under-declaring causes execution on missing context.
+
+Everything else in this guide — decomposition, cross-validation, transparent disclosure, error handling — is a consequence of this principle.
+
+---
+
 ## Execution Workflow
 
 After receiving a ready node, follow this workflow:

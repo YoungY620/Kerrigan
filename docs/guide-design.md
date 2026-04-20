@@ -1,5 +1,7 @@
 # 指导文件（guide.md）设计
 
+> **指导文件存在的根本原因**:Kerrigan 的核心主张是"任务结果即通信" —— agent 间唯一的协调媒介就是 `result_summary`。这意味着每个 agent 独立执行节点时写出的 `result_summary` 质量,直接决定整条 DAG 能不能走下去。指导文件就是教 agent 怎么写出合格的 `result_summary`/`failure_reason` 和怎么合理地 `add` 节点。框架本身不承载内容决策,所有"该怎么做"都在这套指导文件里。
+
 ## 1. 当前问题
 
 prompt 模板（init/continue/resume/fix）告诉 agent 做什么，但没有告诉 agent 怎么做：

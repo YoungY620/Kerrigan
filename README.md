@@ -1,13 +1,17 @@
 # Kerrigan
 
-Communication-less multi-agent orchestration framework. Complex tasks are decomposed into DAG (Directed Acyclic Graph) of work nodes — agents coordinate through shared state instead of messaging each other.
+**Core thesis: the task result IS the communication.** No `sendMessage`, no message queues, no subscription protocols. Every dependency between agents is satisfied when the upstream node writes its `result_summary` — nothing else flows between agents.
+
+Traditional multi-agent frameworks import human-organization complexity (point-to-point messages, broadcasts, interrupts) and inherit its failure modes: context write-amplification, interrupted work, coordination deadlocks. Kerrigan eliminates the category by making structured results the only medium.
+
+DAG is the **means**, not the end: dependencies become edges, topological order replaces protocols, and parallelism falls out for free.
 
 ## Design
 
-- **No inter-agent communication**: agents don't message each other. Dependencies are expressed as DAG edges, results flow through `result_summary` fields.
-- **Context optimization**: each agent receives exactly the context needed for its specific subtask — no context pollution from irrelevant information.
-- **Automatic parallelization**: independent nodes in the DAG execute concurrently. Completed nodes unlock their successors.
-- **Built-in guide system**: a set of guide files deployed to `~/.kerrigan/shared/` provides agents with task decomposition strategy, result reporting templates, and scenario-specific guidance (software development, research, AB testing, git management).
+- **Result = communication**: agents never message each other. A downstream node reads its predecessors' `result_summary` via `kerrigan dag get` — that is the entire coordination surface.
+- **Context optimization**: each agent receives exactly the context needed for its subtask — no pollution from irrelevant chatter.
+- **Automatic parallelization**: independent nodes execute concurrently; completed nodes unlock successors via cascading `Ready`.
+- **Built-in guide system**: guide files deployed to `~/.kerrigan/shared/` provide agents with task decomposition strategy, result-reporting templates, and scenario guidance (software development, research, AB testing, git management).
 
 ## Components
 

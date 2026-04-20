@@ -90,3 +90,4 @@ kerrigan-cli run abc-123 --adapter kimi
 - [Design](docs/design.md) — core design philosophy and architecture
 - [Guide Design](docs/guide-design.md) — guide file system design
 - [Milestone](docs/milestone.md) — roadmap
+- [implement-a-chain](https://github.com/YoungY620/Kerrigan) — head-to-head experiment against Claude Code agent teams; Kerrigan performs on par

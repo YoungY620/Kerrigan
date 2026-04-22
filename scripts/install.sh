@@ -35,7 +35,7 @@ else
     REPO_URL="https://github.com/YoungY620/Kerrigan.git"
 fi
 SOURCE_DIR="$HOME/.kerrigan/.source"
-AGENT_DIR="$HOME/.kitty/agents/default-agent"
+AGENT_DIR="$HOME/.kitty/agents/kerrigan-agent"
 SKILLS_DIR="$HOME/.kerrigan/skills"
 
 # ── Pre-flight checks ───────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ mkdir -p "$AGENT_DIR"
 cp "$SOURCE_DIR/default-agent/agent.yaml"  "$AGENT_DIR/agent.yaml"
 cp "$SOURCE_DIR/default-agent/sub.yaml"    "$AGENT_DIR/sub.yaml"
 cp "$SOURCE_DIR/default-agent/system.md"   "$AGENT_DIR/system.md"
-ok "default-agent deployed"
+ok "kerrigan-agent deployed"
 
 # ── Step 2: Deploy skills ───────────────────────────────────────────────────
 

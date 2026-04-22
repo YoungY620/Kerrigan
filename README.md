@@ -31,7 +31,7 @@ curl -fsSL \
 This will:
 
 1. Clone the repo to `~/.kerrigan/.source/`
-2. Deploy `default-agent` config to `~/.kitty/agents/default-agent/`
+2. Deploy `default-agent` config to `~/.kitty/agents/kerrigan-agent/`
 3. Deploy skills to `~/.kerrigan/skills/`
 4. Build the `kerrigan` CLI (if `cargo` is available)
 

@@ -20,38 +20,37 @@ DAG is the **means**, not the end: dependencies become edges, topological order 
 
 ## Install
 
-Two steps: install the `kerrigan` binary, then deploy the kerrigan skill.
-
-### 1. Install the binary
-
-Download a pre-built binary from [Releases](https://github.com/YoungY620/harness/kerrigan/-/releases), or build from source:
+One-liner (clones repo, deploys agent config + skills, optionally builds CLI):
 
 ```bash
-git clone ssh://git@github.com/YoungY620:30022/harness/kerrigan.git
-cd kerrigan
-make install          # cargo install + copy to ~/.local/bin
+curl -fsSL https://github.com/YoungY620/harness/kerrigan/-/raw/main/scripts/install.sh | sh
 ```
 
-Verify: `kerrigan --version`
+This will:
 
-### 2. Install the kerrigan skill
+1. Clone the repo to `~/.kerrigan/.source/`
+2. Deploy `default-agent` config to `~/.kitty/agents/default-agent/`
+3. Deploy skills to `~/.kerrigan/skills/`
+4. Build the `kerrigan` CLI (if `cargo` is available)
 
-The skill (`SKILL.md` + four scenario guides) is embedded in the binary. Deploy it with:
+Re-run to update. Then make the skill discoverable by your agent:
 
-```bash
-kerrigan init
-```
-
-This writes the skill files to `~/.kerrigan/skills/kerrigan/`. Then make the skill discoverable by your agent:
-
+- **Kitty Worker**: pass `--skills ~/.kerrigan/skills` when launching the worker
 - **Claude Code**: symlink into the user skills directory
   ```bash
   ln -sfn ~/.kerrigan/skills/kerrigan ~/.claude/skills/kerrigan
   ```
-- **Kitty Worker**: pass `--skills ~/.kerrigan/skills` when launching the worker
 - **Kimi CLI**: `kerrigan exec` auto-injects `--skills-dir ~/.kerrigan/skills`, no extra config needed
 
-To update the skill after a new kerrigan release, re-run `kerrigan init` (idempotent).
+### Manual install
+
+If you prefer not to pipe to shell:
+
+```bash
+git clone https://github.com/YoungY620/Kerrigan.git ~/.kerrigan/.source
+cd ~/.kerrigan/.source
+sh scripts/install.sh
+```
 
 ## Usage
 

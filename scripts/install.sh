@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 #
 # Kerrigan installer — run with:
-#   curl -fsSL https://github.com/YoungY620/harness/kerrigan/-/raw/main/scripts/install.sh | sh
+#
+#   # clone from GitHub (public)
+#   curl -fsSL \
+#     "https://raw.githubusercontent.com/YoungY620/Kerrigan/main/scripts/install.sh" | sh
 #
 # What it does (steps 0-3):
 #   0. Clone (or pull) the kerrigan repo into ~/.kerrigan/.source/
@@ -10,6 +13,9 @@
 #   3. Build kerrigan CLI (if cargo is available)
 #
 # Step 4 (starting kitty-worker) is intentionally separate.
+#
+# Environment variables:
+#   No token required for the public GitHub repository
 #
 set -e
 
@@ -22,7 +28,12 @@ error() { printf '\033[1;31m ✗\033[0m  %s\n' "$*" >&2; exit 1; }
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-REPO_URL="https://github.com/YoungY620/Kerrigan.git"
+# Public GitHub clone URL
+if false; then  # legacy private-token branch removed
+    REPO_URL="https://github.com/YoungY620/Kerrigan.git"
+else
+    REPO_URL="https://github.com/YoungY620/Kerrigan.git"
+fi
 SOURCE_DIR="$HOME/.kerrigan/.source"
 AGENT_DIR="$HOME/.kitty/agents/default-agent"
 SKILLS_DIR="$HOME/.kerrigan/skills"

@@ -23,7 +23,9 @@ DAG is the **means**, not the end: dependencies become edges, topological order 
 One-liner (clones repo, deploys agent config + skills, optionally builds CLI):
 
 ```bash
-curl -fsSL https://github.com/YoungY620/harness/kerrigan/-/raw/main/scripts/install.sh | sh
+# clone from GitHub (public)
+curl -fsSL \
+  "https://raw.githubusercontent.com/YoungY620/Kerrigan/main/scripts/install.sh" | sh
 ```
 
 This will:

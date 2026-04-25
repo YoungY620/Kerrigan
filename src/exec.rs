@@ -17,10 +17,32 @@ pub struct ExecDetachResult {
 }
 
 /// Run the exec command.
-pub fn run(task_id: &str, node_id: &str, adapter: &str, detach: bool) -> Result<()> {
+pub fn run(
+    task_id: &str,
+    node_id: &str,
+    adapter: &str,
+    detach: bool,
+    internal_session: Option<&str>,
+) -> Result<()> {
     let registry = RegistryEngine::default_root()?;
     let task_dir = registry.task_dir(task_id);
     let task_engine = TaskEngine::open(&task_dir)?;
+
+    // ── Detach-child fast path ──
+    // Parent already validated Ready, marked Running, and registered the process.
+    // Child receives the session_id and skips all setup.
+    if let Some(session_id) = internal_session {
+        let log_path = task_dir.join("logs").join(format!("{node_id}.jsonl"));
+        return run_foreground(
+            &registry,
+            &task_engine,
+            task_id,
+            node_id,
+            adapter,
+            session_id,
+            &log_path,
+        );
+    }
 
     // Validate node is Ready
     let node = task_engine.get_node(node_id)?;
@@ -53,17 +75,15 @@ pub fn run(task_id: &str, node_id: &str, adapter: &str, detach: bool) -> Result<
     }])?;
 
     if detach {
-        // Fork self without --detach
+        // Fork self, passing session_id so the child skips setup
         let exe = std::env::current_exe().map_err(|e| Error::io("current_exe", e))?;
         let child = Command::new(exe)
             .args([
                 "exec",
-                "--task",
-                task_id,
-                "--node",
-                node_id,
-                "--adapter",
-                adapter,
+                "--task", task_id,
+                "--node", node_id,
+                "--adapter", adapter,
+                "--internal-session", &session_id,
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -73,10 +93,9 @@ pub fn run(task_id: &str, node_id: &str, adapter: &str, detach: bool) -> Result<
 
         let child_pid = child.id();
 
-        // Update PID to the actual child
-        // (we recorded self_pid above; now replace with the forked child)
+        // Replace parent PID with child PID in process record
         if let Some(proc) = task_engine.process_get_by_node(node_id)? {
-            task_engine.process_mark_exited(proc.id, 0)?; // close our record
+            task_engine.process_mark_exited(proc.id, 0)?;
             task_engine.process_create(
                 node_id,
                 child_pid,
@@ -86,12 +105,11 @@ pub fn run(task_id: &str, node_id: &str, adapter: &str, detach: bool) -> Result<
             )?;
         }
 
-        let result = ExecDetachResult {
+        crate::output::output_json(&ExecDetachResult {
             pid: child_pid,
             session_id,
             log_path: log_path.to_string_lossy().into_owned(),
-        };
-        crate::output::output_json(&result);
+        });
         return Ok(());
     }
 

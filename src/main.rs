@@ -134,8 +134,9 @@ fn run(command: Command) -> kerrigan::Result<()> {
             node,
             adapter,
             detach,
+            internal_session,
         } => {
-            kerrigan::exec::run(&task, &node, &adapter, detach)?;
+            kerrigan::exec::run(&task, &node, &adapter, detach, internal_session.as_deref())?;
         }
         Command::Send {
             node,

@@ -67,6 +67,9 @@ pub enum Command {
         /// Run as detached background process
         #[arg(long, help = "Run in background; returns {pid, session_id, log_path}")]
         detach: bool,
+        /// Internal: session ID injected by detach parent — skips node setup
+        #[arg(long, hide = true)]
+        internal_session: Option<String>,
     },
 
     /// Send a message to a node's running agent

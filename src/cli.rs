@@ -213,6 +213,14 @@ pub enum DagCommand {
             help = "Comma-separated node IDs that must succeed before this node can execute"
         )]
         depends_on: Vec<String>,
+        /// Comma-separated successor node IDs (existing nodes that should depend on this node)
+        #[arg(
+            long,
+            default_value = "",
+            value_delimiter = ',',
+            help = "Comma-separated node IDs that will depend on this node (reverse dependency)"
+        )]
+        successor: Vec<String>,
     },
     /// List all nodes in a task's DAG
     #[command(long_about = "List all nodes in a task's DAG with summary info.\n\

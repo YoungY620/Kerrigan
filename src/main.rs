@@ -59,17 +59,21 @@ fn run(command: Command) -> kerrigan::Result<()> {
                     summary,
                     description,
                     depends_on,
+                    successor,
                 } => {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
                     let deps: Vec<String> =
                         depends_on.into_iter().filter(|s| !s.is_empty()).collect();
+                    let succs: Vec<String> =
+                        successor.into_iter().filter(|s| !s.is_empty()).collect();
                     let id = te.add_node(
                         NewNode {
                             summary,
                             description,
                         },
                         deps,
+                        succs,
                     )?;
                     output_json(serde_json::json!({"node_id": id}));
                 }

@@ -158,7 +158,12 @@ impl TaskEngine {
 
     // ── DAG operations ──
 
-    pub fn add_node(&self, new_node: NewNode, depends_on: Vec<NodeId>) -> Result<NodeId> {
+    pub fn add_node(
+        &self,
+        new_node: NewNode,
+        depends_on: Vec<NodeId>,
+        successors: Vec<NodeId>,
+    ) -> Result<NodeId> {
         let node_id = uuid::Uuid::new_v4().to_string();
 
         let tx = self
@@ -166,6 +171,7 @@ impl TaskEngine {
             .unchecked_transaction()
             .map_err(|e| Error::Db(format!("add_node tx: {e}")))?;
 
+        // Validate predecessors exist
         for dep_id in &depends_on {
             let exists: bool = tx
                 .query_row(
@@ -179,6 +185,27 @@ impl TaskEngine {
             }
         }
 
+        // Validate successors exist
+        for succ_id in &successors {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?1)",
+                    params![succ_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| Error::Db(format!("add_node validate successor: {e}")))?;
+            if !exists {
+                return Err(Error::NodeNotFound(succ_id.clone()));
+            }
+        }
+
+        // Cycle detection: if any successor can reach any predecessor via existing edges,
+        // inserting this node as a bridge (pred→N→succ) would form a cycle.
+        if any_path_exists(&tx, &successors, &depends_on)? {
+            return Err(Error::CycleDetected);
+        }
+
+        // Determine initial status
         let status = if depends_on.is_empty() {
             "ready"
         } else {
@@ -210,12 +237,27 @@ impl TaskEngine {
         )
         .map_err(|e| Error::Db(format!("add_node insert: {e}")))?;
 
+        // Predecessor edges: dep → new node
         for dep_id in &depends_on {
             tx.execute(
                 "INSERT INTO node_edges (predecessor_id, successor_id) VALUES (?1, ?2)",
                 params![dep_id, node_id],
             )
             .map_err(|e| Error::Db(format!("add_node edge: {e}")))?;
+        }
+
+        // Successor edges: new node → succ
+        for succ_id in &successors {
+            tx.execute(
+                "INSERT INTO node_edges (predecessor_id, successor_id) VALUES (?1, ?2)",
+                params![node_id, succ_id],
+            )
+            .map_err(|e| Error::Db(format!("add_node successor edge: {e}")))?;
+        }
+
+        // If new node is pending, any ready successors must be demoted to pending
+        if status == "pending" && !successors.is_empty() {
+            cascade_pending_sql(&tx)?;
         }
 
         tx.commit()
@@ -668,6 +710,78 @@ fn cascade_ready_sql(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn cascade_pending_sql(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    loop {
+        let changed = tx
+            .execute(
+                "UPDATE nodes SET status = 'pending'
+                 WHERE status = 'ready'
+                   AND EXISTS (
+                       SELECT 1 FROM node_edges e
+                       JOIN nodes pred ON pred.id = e.predecessor_id
+                       WHERE e.successor_id = nodes.id
+                         AND pred.status != 'succeeded'
+                   )",
+                [],
+            )
+            .map_err(|e| Error::Db(format!("cascade_pending: {e}")))?;
+        if changed == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Multi-source BFS: check if any node in `from_set` can reach any node in `to_set`
+/// via existing forward edges. Used for cycle detection before inserting new edges.
+fn any_path_exists(
+    tx: &rusqlite::Transaction<'_>,
+    from_set: &[NodeId],
+    to_set: &[NodeId],
+) -> Result<bool> {
+    if from_set.is_empty() || to_set.is_empty() {
+        return Ok(false);
+    }
+
+    let to_set: std::collections::HashSet<&str> =
+        to_set.iter().map(|s| s.as_str()).collect();
+
+    // Load entire edge set once
+    let mut adj: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut stmt = tx
+        .prepare("SELECT predecessor_id, successor_id FROM node_edges")
+        .map_err(|e| Error::Db(format!("cycle check edges: {e}")))?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| Error::Db(format!("cycle check edges: {e}")))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| Error::Db(format!("cycle check edges: {e}")))?;
+    for (pred, succ) in rows {
+        adj.entry(pred).or_default().push(succ);
+    }
+
+    // BFS from all sources simultaneously
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<String> =
+        from_set.iter().cloned().collect();
+
+    while let Some(current) = queue.pop_front() {
+        if to_set.contains(current.as_str()) {
+            return Ok(true);
+        }
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        if let Some(nexts) = adj.get(&current) {
+            for next in nexts {
+                queue.push_back(next.clone());
+            }
+        }
+    }
+    Ok(false)
+}
+
 // ── Status helpers ──
 
 fn status_str(s: NodeStatus) -> &'static str {
@@ -726,4 +840,479 @@ fn now_iso() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     format!("{}", duration.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    fn eng() -> (TaskEngine, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let e = TaskEngine::open(dir.path()).unwrap();
+        (e, dir)
+    }
+
+    fn add(e: &TaskEngine, summary: &str, deps: &[&str], succs: &[&str]) -> NodeId {
+        e.add_node(
+            NewNode { summary: summary.into(), description: String::new() },
+            deps.iter().map(|s| s.to_string()).collect(),
+            succs.iter().map(|s| s.to_string()).collect(),
+        )
+        .unwrap()
+    }
+
+    fn try_add(
+        e: &TaskEngine,
+        summary: &str,
+        deps: &[&str],
+        succs: &[&str],
+    ) -> Result<NodeId> {
+        e.add_node(
+            NewNode { summary: summary.into(), description: String::new() },
+            deps.iter().map(|s| s.to_string()).collect(),
+            succs.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    fn status(e: &TaskEngine, id: &str) -> NodeStatus {
+        e.get_node(id).unwrap().status
+    }
+
+    fn succeed(e: &TaskEngine, id: &str) {
+        e.update_nodes(vec![NodeUpdate {
+            id: id.to_string(),
+            status: Some(NodeStatus::Succeeded),
+            metadata: Some(NodeMetadata {
+                result_summary: Some("ok".into()),
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+    }
+
+    fn run(e: &TaskEngine, id: &str) {
+        e.update_nodes(vec![NodeUpdate {
+            id: id.to_string(),
+            status: Some(NodeStatus::Running),
+            metadata: None,
+        }])
+        .unwrap();
+    }
+
+    // ── Basic node creation ───────────────────────────────────────────────────
+
+    #[test]
+    fn root_node_is_ready() {
+        let (e, _d) = eng();
+        let n = add(&e, "root", &[], &[]);
+        assert_eq!(status(&e, &n), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn node_is_pending_when_dep_not_succeeded() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        assert_eq!(status(&e, &a), NodeStatus::Ready);
+        assert_eq!(status(&e, &b), NodeStatus::Pending);
+    }
+
+    #[test]
+    fn node_is_ready_when_all_deps_succeeded() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        succeed(&e, &a);
+        let b = add(&e, "B", &[&a], &[]);
+        assert_eq!(status(&e, &b), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn node_pending_when_one_dep_not_succeeded() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[], &[]);
+        succeed(&e, &a);
+        // c depends on both; b is ready but not succeeded
+        let c = add(&e, "C", &[&a, &b], &[]);
+        assert_eq!(status(&e, &c), NodeStatus::Pending);
+    }
+
+    // ── cascade_ready ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn cascade_ready_single_hop() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        assert_eq!(status(&e, &b), NodeStatus::Pending);
+        succeed(&e, &a);
+        assert_eq!(status(&e, &b), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn cascade_ready_chain() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&b], &[]);
+        let d = add(&e, "D", &[&c], &[]);
+        succeed(&e, &a);
+        assert_eq!(status(&e, &b), NodeStatus::Ready);
+        assert_eq!(status(&e, &c), NodeStatus::Pending);
+        succeed(&e, &b);
+        assert_eq!(status(&e, &c), NodeStatus::Ready);
+        assert_eq!(status(&e, &d), NodeStatus::Pending);
+        succeed(&e, &c);
+        assert_eq!(status(&e, &d), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn cascade_ready_fan_out() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&a], &[]);
+        let d = add(&e, "D", &[&a], &[]);
+        succeed(&e, &a);
+        assert_eq!(status(&e, &b), NodeStatus::Ready);
+        assert_eq!(status(&e, &c), NodeStatus::Ready);
+        assert_eq!(status(&e, &d), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn cascade_ready_fan_in_partial() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[], &[]);
+        let c = add(&e, "C", &[&a, &b], &[]);
+        succeed(&e, &a);
+        assert_eq!(status(&e, &c), NodeStatus::Pending); // b still not succeeded
+        succeed(&e, &b);
+        assert_eq!(status(&e, &c), NodeStatus::Ready);
+    }
+
+    // ── list_ready ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_ready_returns_only_ready_nodes() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[], &[]);
+        let ready_ids: Vec<_> = e.list_ready().unwrap().into_iter().map(|n| n.id).collect();
+        assert!(ready_ids.contains(&a));
+        assert!(ready_ids.contains(&c));
+        assert!(!ready_ids.contains(&b));
+    }
+
+    // ── --successor: edge creation and visibility ─────────────────────────────
+
+    #[test]
+    fn successor_edges_visible_in_get_node() {
+        let (e, _d) = eng();
+        let s = add(&e, "S", &[], &[]);
+        succeed(&e, &s);
+        let n = add(&e, "N", &[], &[&s]);
+        let n_node = e.get_node(&n).unwrap();
+        let s_node = e.get_node(&s).unwrap();
+        assert!(n_node.successors.contains(&s));
+        assert!(s_node.predecessors.contains(&n));
+    }
+
+    #[test]
+    fn deps_and_succs_both_visible() {
+        let (e, _d) = eng();
+        let p = add(&e, "P", &[], &[]);
+        succeed(&e, &p);
+        let s = add(&e, "S", &[], &[]);
+        let n = add(&e, "N", &[&p], &[&s]);
+        let n_node = e.get_node(&n).unwrap();
+        assert!(n_node.predecessors.contains(&p));
+        assert!(n_node.successors.contains(&s));
+    }
+
+    // ── --successor: cascade_pending ─────────────────────────────────────────
+
+    #[test]
+    fn ready_successor_demoted_when_new_node_is_pending() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]); // ready, not succeeded
+        let s = add(&e, "S", &[], &[]);     // independent, ready
+        assert_eq!(status(&e, &s), NodeStatus::Ready);
+        let n = add(&e, "N", &[&dep], &[&s]); // N is pending (dep not succeeded)
+        assert_eq!(status(&e, &n), NodeStatus::Pending);
+        assert_eq!(status(&e, &s), NodeStatus::Pending); // demoted
+    }
+
+    #[test]
+    fn ready_successor_stays_ready_when_new_node_is_ready() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]);
+        succeed(&e, &dep); // dep succeeded → N will be ready
+        let s = add(&e, "S", &[], &[]);
+        let n = add(&e, "N", &[&dep], &[&s]);
+        assert_eq!(status(&e, &n), NodeStatus::Ready);
+        assert_eq!(status(&e, &s), NodeStatus::Ready); // not demoted
+    }
+
+    #[test]
+    fn multiple_ready_successors_all_demoted() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]);
+        let s1 = add(&e, "S1", &[], &[]);
+        let s2 = add(&e, "S2", &[], &[]);
+        let s3 = add(&e, "S3", &[], &[]);
+        add(&e, "N", &[&dep], &[&s1, &s2, &s3]);
+        assert_eq!(status(&e, &s1), NodeStatus::Pending);
+        assert_eq!(status(&e, &s2), NodeStatus::Pending);
+        assert_eq!(status(&e, &s3), NodeStatus::Pending);
+    }
+
+    #[test]
+    fn cascade_pending_chain() {
+        // N(pending) → S1(ready) → S2 was ready because S1 was succeeded at S2 creation.
+        // After inserting N→S1: S1 becomes pending (direct effect).
+        // S2 has S1 (now pending) as predecessor → S2 should also become pending.
+        let (e, _d) = eng();
+        let s1 = add(&e, "S1", &[], &[]);
+        succeed(&e, &s1); // S1 succeeded
+        let s2 = add(&e, "S2", &[&s1], &[]); // S2 is ready (S1 succeeded)
+        assert_eq!(status(&e, &s2), NodeStatus::Ready);
+        // Now insert N(pending) with S1 as successor.
+        // But S1 is succeeded — cascade_pending only touches ready nodes → S1 not demoted.
+        // So S2 (which has only S1 as dep, and S1 is succeeded) stays ready.
+        let dep = add(&e, "dep", &[], &[]);
+        add(&e, "N", &[&dep], &[&s1]);
+        assert_eq!(status(&e, &s1), NodeStatus::Succeeded); // not demoted
+        assert_eq!(status(&e, &s2), NodeStatus::Ready);     // not affected
+
+        // Real chain: S1 and S2 both ready (not succeeded), then insert pending predecessor of S1.
+        let (e2, _d2) = eng();
+        let r1 = add(&e2, "R1", &[], &[]); // ready
+        let r2 = add(&e2, "R2", &[], &[]); // ready (independent)
+        // Make r2 depend on r1 via a new intermediate node (using --successor)
+        // Actually we can't add deps after creation. Let's just verify direct demotion:
+        let dep2 = add(&e2, "dep2", &[], &[]);
+        add(&e2, "M", &[&dep2], &[&r1, &r2]); // both demoted
+        assert_eq!(status(&e2, &r1), NodeStatus::Pending);
+        assert_eq!(status(&e2, &r2), NodeStatus::Pending);
+    }
+
+    #[test]
+    fn cascade_pending_skips_running_node() {
+        let (e, _d) = eng();
+        let s = add(&e, "S", &[], &[]);
+        run(&e, &s); // S is now running
+        let dep = add(&e, "dep", &[], &[]);
+        add(&e, "N", &[&dep], &[&s]);
+        // cascade_pending only touches 'ready' nodes
+        assert_eq!(status(&e, &s), NodeStatus::Running);
+    }
+
+    #[test]
+    fn cascade_pending_skips_succeeded_node() {
+        let (e, _d) = eng();
+        let s = add(&e, "S", &[], &[]);
+        succeed(&e, &s);
+        let dep = add(&e, "dep", &[], &[]);
+        add(&e, "N", &[&dep], &[&s]);
+        assert_eq!(status(&e, &s), NodeStatus::Succeeded);
+    }
+
+    #[test]
+    fn cascade_pending_skips_failed_node() {
+        let (e, _d) = eng();
+        let s = add(&e, "S", &[], &[]);
+        e.update_nodes(vec![NodeUpdate {
+            id: s.clone(),
+            status: Some(NodeStatus::Failed),
+            metadata: None,
+        }])
+        .unwrap();
+        let dep = add(&e, "dep", &[], &[]);
+        add(&e, "N", &[&dep], &[&s]);
+        assert_eq!(status(&e, &s), NodeStatus::Failed);
+    }
+
+    #[test]
+    fn unrelated_ready_node_not_affected() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]);
+        let s = add(&e, "S", &[], &[]);   // successor of N
+        let x = add(&e, "X", &[], &[]);   // unrelated, should stay ready
+        add(&e, "N", &[&dep], &[&s]);
+        assert_eq!(status(&e, &s), NodeStatus::Pending);
+        assert_eq!(status(&e, &x), NodeStatus::Ready); // untouched
+    }
+
+    #[test]
+    fn no_successor_no_cascade_pending() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]);
+        let other = add(&e, "other", &[], &[]); // ready, no relation to N
+        add(&e, "N", &[&dep], &[]);
+        assert_eq!(status(&e, &other), NodeStatus::Ready);
+    }
+
+    // ── Cycle detection ───────────────────────────────────────────────────────
+
+    #[test]
+    fn cycle_direct_same_node_as_dep_and_succ() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let err = try_add(&e, "N", &[&a], &[&a]).unwrap_err();
+        assert!(matches!(err, Error::CycleDetected));
+    }
+
+    #[test]
+    fn cycle_indirect_path_exists() {
+        // A → B → C exists; inserting N with dep=C and succ=A creates C→N→A…→C
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&b], &[]);
+        let err = try_add(&e, "N", &[&c], &[&a]).unwrap_err();
+        assert!(matches!(err, Error::CycleDetected));
+    }
+
+    #[test]
+    fn cycle_longer_path() {
+        // A → B → C → D; inserting N with dep=D and succ=A
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&b], &[]);
+        let d = add(&e, "D", &[&c], &[]);
+        assert!(matches!(
+            try_add(&e, "N", &[&d], &[&a]),
+            Err(Error::CycleDetected)
+        ));
+    }
+
+    #[test]
+    fn no_cycle_parallel_branches() {
+        // A → B and A → C; adding N with dep=B and succ=C is fine (C cannot reach B)
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&a], &[]);
+        assert!(try_add(&e, "N", &[&b], &[&c]).is_ok());
+    }
+
+    #[test]
+    fn no_cycle_successor_has_no_outgoing_edges() {
+        // P → S exists; inserting N with dep=P and succ=S is fine (S has no edges)
+        let (e, _d) = eng();
+        let p = add(&e, "P", &[], &[]);
+        let s = add(&e, "S", &[&p], &[]);
+        // S has no outgoing edges → no path from S back to P
+        assert!(try_add(&e, "N", &[&p], &[&s]).is_ok());
+    }
+
+    #[test]
+    fn no_cycle_with_successor_no_predecessors() {
+        // N has no deps but has a successor — no cycle possible
+        let (e, _d) = eng();
+        let s = add(&e, "S", &[], &[]);
+        assert!(try_add(&e, "N", &[], &[&s]).is_ok());
+    }
+
+    #[test]
+    fn no_cycle_complex_diamond() {
+        // A → B → D and A → C → D (diamond); adding N with dep=D and succ=... not A/B/C
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[&a], &[]);
+        let d = add(&e, "D", &[&b, &c], &[]);
+        let x = add(&e, "X", &[], &[]); // independent
+        // N with dep=D, succ=X: X has no path to A/B/C/D → ok
+        assert!(try_add(&e, "N", &[&d], &[&x]).is_ok());
+        // N2 with dep=D, succ=A: path A→B→D exists, so D→N2→A→B→D is a cycle → error
+        assert!(matches!(
+            try_add(&e, "N2", &[&d], &[&a]),
+            Err(Error::CycleDetected)
+        ));
+    }
+
+    #[test]
+    fn cycle_via_one_of_multiple_successors() {
+        // A → B; adding N with dep=A and succs=[B, C] where B can reach A → cycle
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let c = add(&e, "C", &[], &[]);
+        // B can reach A? No, B→A doesn't exist. Let's set up a real cycle:
+        // A → B → X; N with dep=X, succ=A → cycle X→N→A→B→X (via existing A→B)
+        let x = add(&e, "X", &[&b], &[]);
+        // succ A: path from A → B → X (A can reach X), so path from A back to X? No.
+        // We need path FROM succ TO dep.
+        // dep=X, succ=A: path from A to X? A→B→X yes! → cycle detected
+        let err = try_add(&e, "N", &[&x], &[&a, &c]).unwrap_err();
+        assert!(matches!(err, Error::CycleDetected));
+    }
+
+    // ── Validation errors ─────────────────────────────────────────────────────
+
+    #[test]
+    fn error_predecessor_not_found() {
+        let (e, _d) = eng();
+        let err = try_add(&e, "N", &["bad-id"], &[]).unwrap_err();
+        assert!(matches!(err, Error::NodeNotFound(_)));
+    }
+
+    #[test]
+    fn error_successor_not_found() {
+        let (e, _d) = eng();
+        let err = try_add(&e, "N", &[], &["bad-id"]).unwrap_err();
+        assert!(matches!(err, Error::NodeNotFound(_)));
+    }
+
+    // ── update_nodes state machine ────────────────────────────────────────────
+
+    #[test]
+    fn invalid_transition_rejected() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        // pending → succeeded is not valid (must go through running)
+        // actually ready → succeeded IS valid per validate_transition
+        // Let's try succeeded → running
+        succeed(&e, &n);
+        let err = e
+            .update_nodes(vec![NodeUpdate {
+                id: n.clone(),
+                status: Some(NodeStatus::Running),
+                metadata: None,
+            }])
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidStateTransition { .. }));
+    }
+
+    #[test]
+    fn ready_to_failed_is_valid() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: Some(NodeStatus::Failed),
+            metadata: Some(NodeMetadata {
+                failure_reason: Some("deliberate".into()),
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+        assert_eq!(status(&e, &n), NodeStatus::Failed);
+    }
+
+    #[test]
+    fn update_metadata_stored_and_retrieved() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        succeed(&e, &n);
+        let node = e.get_node(&n).unwrap();
+        assert_eq!(node.metadata.result_summary.as_deref(), Some("ok"));
+    }
 }

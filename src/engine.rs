@@ -1315,4 +1315,415 @@ mod tests {
         let node = e.get_node(&n).unwrap();
         assert_eq!(node.metadata.result_summary.as_deref(), Some("ok"));
     }
+
+    // ── Error cases ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_node_not_found() {
+        let (e, _d) = eng();
+        assert!(matches!(e.get_node("no-such-id"), Err(Error::NodeNotFound(_))));
+    }
+
+    #[test]
+    fn update_nodes_not_found() {
+        let (e, _d) = eng();
+        let err = e
+            .update_nodes(vec![NodeUpdate {
+                id: "no-such-id".into(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: None,
+            }])
+            .unwrap_err();
+        assert!(matches!(err, Error::NodeNotFound(_)));
+    }
+
+    // ── Batch updates ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn update_nodes_batch_multiple_nodes() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[], &[]);
+        e.update_nodes(vec![
+            NodeUpdate {
+                id: a.clone(),
+                status: Some(NodeStatus::Succeeded),
+                metadata: Some(NodeMetadata {
+                    result_summary: Some("a_result".into()),
+                    ..Default::default()
+                }),
+            },
+            NodeUpdate {
+                id: b.clone(),
+                status: Some(NodeStatus::Failed),
+                metadata: Some(NodeMetadata {
+                    failure_reason: Some("b_fail".into()),
+                    ..Default::default()
+                }),
+            },
+        ])
+        .unwrap();
+        assert_eq!(status(&e, &a), NodeStatus::Succeeded);
+        assert_eq!(status(&e, &b), NodeStatus::Failed);
+        assert_eq!(
+            e.get_node(&a).unwrap().metadata.result_summary.as_deref(),
+            Some("a_result")
+        );
+        assert_eq!(
+            e.get_node(&b).unwrap().metadata.failure_reason.as_deref(),
+            Some("b_fail")
+        );
+    }
+
+    #[test]
+    fn update_nodes_session_ids_roundtrip() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: Some(NodeStatus::Succeeded),
+            metadata: Some(NodeMetadata {
+                result_summary: Some("ok".into()),
+                session_ids: vec!["sess-aaa".into(), "sess-bbb".into()],
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+        let node = e.get_node(&n).unwrap();
+        assert!(node.metadata.session_ids.contains(&"sess-aaa".to_string()));
+        assert!(node.metadata.session_ids.contains(&"sess-bbb".to_string()));
+    }
+
+    #[test]
+    fn update_nodes_session_ids_replaced_on_reupdate() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
+        e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: None,
+            metadata: Some(NodeMetadata {
+                session_ids: vec!["old".into()],
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+        e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: None,
+            metadata: Some(NodeMetadata {
+                session_ids: vec!["new".into()],
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+        let node = e.get_node(&n).unwrap();
+        assert!(!node.metadata.session_ids.contains(&"old".to_string()));
+        assert!(node.metadata.session_ids.contains(&"new".to_string()));
+    }
+
+    #[test]
+    fn update_nodes_spawned_tasks_roundtrip() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        let c1 = add(&e, "child1", &[], &[]);
+        let c2 = add(&e, "child2", &[], &[]);
+        e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: None,
+            metadata: Some(NodeMetadata {
+                spawned_tasks: vec![c1.clone(), c2.clone()],
+                ..Default::default()
+            }),
+        }])
+        .unwrap();
+        let node = e.get_node(&n).unwrap();
+        assert!(node.metadata.spawned_tasks.contains(&c1));
+        assert!(node.metadata.spawned_tasks.contains(&c2));
+    }
+
+    // ── list_all ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_all_includes_all_statuses() {
+        let (e, _d) = eng();
+        let ready = add(&e, "ready", &[], &[]);
+        let dep = add(&e, "dep", &[], &[]);
+        let pending = add(&e, "pending", &[&dep], &[]);
+        let failed = add(&e, "failed", &[], &[]);
+        e.update_nodes(vec![NodeUpdate {
+            id: failed.clone(),
+            status: Some(NodeStatus::Failed),
+            metadata: None,
+        }])
+        .unwrap();
+
+        let all = e.list_all().unwrap();
+        let map: std::collections::HashMap<_, _> =
+            all.iter().map(|n| (n.id.clone(), n.status)).collect();
+        assert_eq!(map[&ready], NodeStatus::Ready);
+        assert_eq!(map[&pending], NodeStatus::Pending);
+        assert_eq!(map[&failed], NodeStatus::Failed);
+    }
+
+    #[test]
+    fn list_all_empty() {
+        let (e, _d) = eng();
+        assert!(e.list_all().unwrap().is_empty());
+    }
+
+    // ── Process tracking ──────────────────────────────────────────────────────
+
+    #[test]
+    fn process_create_and_get_by_node() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.process_create(&n, 12345, "sess-1", "kimi", "/tmp/log.jsonl")
+            .unwrap();
+        let proc = e.process_get_by_node(&n).unwrap().unwrap();
+        assert_eq!(proc.node_id, n);
+        assert_eq!(proc.pid, 12345);
+        assert_eq!(proc.session_id, "sess-1");
+        assert_eq!(proc.adapter, "kimi");
+        assert_eq!(proc.status, ProcessStatus::Running);
+        assert!(proc.exit_code.is_none());
+        assert!(proc.ended_at.is_none());
+    }
+
+    #[test]
+    fn process_get_by_node_returns_latest() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.process_create(&n, 1, "sess-1", "kimi", "/log").unwrap();
+        e.process_create(&n, 2, "sess-2", "kimi", "/log").unwrap();
+        let proc = e.process_get_by_node(&n).unwrap().unwrap();
+        assert_eq!(proc.pid, 2);
+        assert_eq!(proc.session_id, "sess-2");
+    }
+
+    #[test]
+    fn process_get_by_node_none_when_no_process() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        assert!(e.process_get_by_node(&n).unwrap().is_none());
+    }
+
+    #[test]
+    fn process_mark_exited_zero() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.process_create(&n, 100, "s", "kimi", "/log").unwrap();
+        let id = e.process_get_by_node(&n).unwrap().unwrap().id;
+        e.process_mark_exited(id, 0).unwrap();
+        let updated = e.process_get_by_node(&n).unwrap().unwrap();
+        assert_eq!(updated.status, ProcessStatus::Exited);
+        assert_eq!(updated.exit_code, Some(0));
+        assert!(updated.ended_at.is_some());
+    }
+
+    #[test]
+    fn process_mark_exited_nonzero() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.process_create(&n, 100, "s", "kimi", "/log").unwrap();
+        let id = e.process_get_by_node(&n).unwrap().unwrap().id;
+        e.process_mark_exited(id, 1).unwrap();
+        assert_eq!(
+            e.process_get_by_node(&n).unwrap().unwrap().exit_code,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn process_mark_killed() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.process_create(&n, 100, "s", "kimi", "/log").unwrap();
+        let id = e.process_get_by_node(&n).unwrap().unwrap().id;
+        e.process_mark_killed(id).unwrap();
+        let updated = e.process_get_by_node(&n).unwrap().unwrap();
+        assert_eq!(updated.status, ProcessStatus::Killed);
+        assert!(updated.ended_at.is_some());
+    }
+
+    #[test]
+    fn process_list_running_filters_non_running() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[], &[]);
+        let c = add(&e, "C", &[], &[]);
+        e.process_create(&a, 1, "s1", "kimi", "/log").unwrap();
+        e.process_create(&b, 2, "s2", "kimi", "/log").unwrap();
+        e.process_create(&c, 3, "s3", "kimi", "/log").unwrap();
+
+        let id_b = e.process_get_by_node(&b).unwrap().unwrap().id;
+        e.process_mark_exited(id_b, 0).unwrap();
+        let id_c = e.process_get_by_node(&c).unwrap().unwrap().id;
+        e.process_mark_killed(id_c).unwrap();
+
+        let running = e.process_list_running().unwrap();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].pid, 1);
+    }
+
+    #[test]
+    fn process_list_running_empty_initially() {
+        let (e, _d) = eng();
+        assert!(e.process_list_running().unwrap().is_empty());
+    }
+
+    // ── Message queue ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn message_enqueue_and_consume_fifo() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.message_enqueue(&n, "first").unwrap();
+        e.message_enqueue(&n, "second").unwrap();
+        e.message_enqueue(&n, "third").unwrap();
+        assert_eq!(e.message_consume(&n).unwrap().unwrap().content, "first");
+        assert_eq!(e.message_consume(&n).unwrap().unwrap().content, "second");
+        assert_eq!(e.message_consume(&n).unwrap().unwrap().content, "third");
+        assert!(e.message_consume(&n).unwrap().is_none());
+    }
+
+    #[test]
+    fn message_consume_empty_returns_none() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        assert!(e.message_consume(&n).unwrap().is_none());
+    }
+
+    #[test]
+    fn message_consume_idempotent_after_consumed() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        e.message_enqueue(&n, "msg").unwrap();
+        e.message_consume(&n).unwrap().unwrap();
+        assert!(e.message_consume(&n).unwrap().is_none());
+    }
+
+    #[test]
+    fn message_queue_independent_per_node() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[], &[]);
+        e.message_enqueue(&a, "for_a").unwrap();
+        e.message_enqueue(&b, "for_b").unwrap();
+        assert_eq!(e.message_consume(&a).unwrap().unwrap().content, "for_a");
+        assert_eq!(e.message_consume(&b).unwrap().unwrap().content, "for_b");
+    }
+
+    // ── viz_data ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn viz_data_empty() {
+        let (e, _d) = eng();
+        let (nodes, edges) = e.viz_data().unwrap();
+        assert!(nodes.is_empty());
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn viz_data_nodes_and_edges() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        let (nodes, edges) = e.viz_data().unwrap();
+        let ids: Vec<_> = nodes.iter().map(|n| n.id.clone()).collect();
+        assert!(ids.contains(&a));
+        assert!(ids.contains(&b));
+        assert!(edges
+            .iter()
+            .any(|e| e.predecessor_id == a && e.successor_id == b));
+    }
+
+    // ── RegistryEngine ────────────────────────────────────────────────────────
+
+    fn registry_eng() -> (RegistryEngine, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let e = RegistryEngine::new(dir.path()).unwrap();
+        (e, dir)
+    }
+
+    #[test]
+    fn task_create_returns_uuid_and_creates_db() {
+        let (reg, _d) = registry_eng();
+        let id = reg.task_create("my task", "/work").unwrap();
+        assert!(!id.is_empty());
+        assert!(reg.task_dir(&id).join("task.db").exists());
+    }
+
+    #[test]
+    fn task_list_returns_all_created() {
+        let (reg, _d) = registry_eng();
+        let id1 = reg.task_create("task1", "/tmp").unwrap();
+        let id2 = reg.task_create("task2", "/tmp").unwrap();
+        let ids: Vec<_> = reg.task_list().unwrap().into_iter().map(|t| t.id).collect();
+        assert!(ids.contains(&id1));
+        assert!(ids.contains(&id2));
+    }
+
+    #[test]
+    fn task_list_empty_initially() {
+        let (reg, _d) = registry_eng();
+        assert!(reg.task_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn task_get_returns_correct_fields() {
+        let (reg, _d) = registry_eng();
+        let id = reg.task_create("my summary", "/the/workdir").unwrap();
+        let task = reg.task_get(&id).unwrap();
+        assert_eq!(task.summary, "my summary");
+        assert_eq!(task.workdir, "/the/workdir");
+        assert!(!task.created_at.is_empty());
+    }
+
+    #[test]
+    fn task_get_not_found() {
+        let (reg, _d) = registry_eng();
+        assert!(matches!(
+            reg.task_get("nonexistent"),
+            Err(Error::TaskNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn init_deploys_skill_files() {
+        let (reg, _d) = registry_eng();
+        reg.init().unwrap();
+        let skill_dir = reg.skills_dir().join("kerrigan");
+        assert!(skill_dir.join("SKILL.md").exists());
+        assert!(skill_dir.join("guide.md").exists());
+        assert!(skill_dir.join("guide-research.md").exists());
+    }
+
+    #[test]
+    fn init_is_idempotent() {
+        let (reg, _d) = registry_eng();
+        reg.init().unwrap();
+        reg.init().unwrap(); // second call must not fail
+    }
+
+    // ── Successor + cascade_ready integration ─────────────────────────────────
+
+    #[test]
+    fn successor_then_cascade_ready_full_pipeline() {
+        // D → N → S; after D succeeds N becomes ready; after N succeeds S becomes ready
+        let (e, _d) = eng();
+        let d = add(&e, "D", &[], &[]);
+        let s = add(&e, "S", &[], &[]);
+        let n = add(&e, "N", &[&d], &[&s]);
+
+        assert_eq!(status(&e, &n), NodeStatus::Pending);
+        assert_eq!(status(&e, &s), NodeStatus::Pending); // demoted by cascade_pending
+
+        succeed(&e, &d);
+        assert_eq!(status(&e, &n), NodeStatus::Ready); // cascade_ready
+        assert_eq!(status(&e, &s), NodeStatus::Pending); // N not yet succeeded
+
+        succeed(&e, &n);
+        assert_eq!(status(&e, &s), NodeStatus::Ready); // cascade_ready
+    }
 }

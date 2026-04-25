@@ -6,6 +6,7 @@ pub mod model;
 pub mod output;
 pub mod prompt;
 pub mod send;
+pub mod viz;
 pub mod watch;
 
 pub use engine::{RegistryEngine, TaskEngine};

@@ -57,8 +57,14 @@
 ...
 
 ## 原文索引
-- msg_xxx (群 A, 14:32, @张三): "......"
-- msg_yyy (群 B, 15:08, @李四): "......"
+
+| message_id | 群 | 时间 | 发言人 | 消息摘录 |
+|---|---|---|---|---|
+| msg_xxx | 群 A | 14:32 | @张三 | "Redis 8 发布了，QPS 涨了不少……" |
+| msg_yyy | 群 B | 15:08 | @李四 | "我测了下 KeyDB，比 Redis 8 稍慢……" |
+| msg_zzz | 群 A | 14:45 | @王五 | "有没有人压测过内存占用？" |
+
+→ **[完整原文上下文 →](https://xxx.feishu.cn/docx/<raw_context_doc_id>)**
 ```
 
 ---
@@ -91,11 +97,11 @@ Stage 4a 产出,**简洁、指路型**,每主题章节 ≤ 10 行(不含 1 张�
 
 ![key-chart](./figs/topic1-perf.png)
 
-→ **[详见主题 1 详细文档](https://xxx.feishu.cn/docx/<topic1_doc_id>)**
+→ **[详见主题 1 详细文档](https://xxx.feishu.cn/docx/<topic1_doc_id>)**  →  **[原文上下文](https://xxx.feishu.cn/docx/<topic1_raw_doc_id>)**
 
 # {主题 2}
 ...
-→ **[详见主题 2 详细文档](https://xxx.feishu.cn/docx/<topic2_doc_id>)**
+→ **[详见主题 2 详细文档](https://xxx.feishu.cn/docx/<topic2_doc_id>)**  →  **[原文上下文](https://xxx.feishu.cn/docx/<topic2_raw_doc_id>)**
 
 # 聊天参考(未深度调研)
 - 主题 X (群 B): 原因 — 数据不足

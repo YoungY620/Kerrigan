@@ -537,6 +537,59 @@ impl TaskEngine {
         Ok(summaries)
     }
 
+    pub fn viz_data(&self) -> Result<(Vec<crate::model::VizNodeData>, Vec<crate::model::VizEdgeData>)> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, summary, status, result_summary, failure_reason FROM nodes ORDER BY rowid",
+            )
+            .map_err(|e| Error::Db(format!("viz_data nodes: {e}")))?;
+
+        let nodes = stmt
+            .query_map([], |row| {
+                let status_s: String = row.get(2)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    status_s,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|e| Error::Db(format!("viz_data nodes query: {e}")))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::Db(format!("viz_data nodes row: {e}")))?
+            .into_iter()
+            .map(|(id, summary, status_s, result_summary, failure_reason)| {
+                Ok(crate::model::VizNodeData {
+                    id,
+                    summary,
+                    status: parse_status(&status_s)?,
+                    result_summary,
+                    failure_reason,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT predecessor_id, successor_id FROM node_edges")
+            .map_err(|e| Error::Db(format!("viz_data edges: {e}")))?;
+
+        let edges = stmt
+            .query_map([], |row| {
+                Ok(crate::model::VizEdgeData {
+                    predecessor_id: row.get(0)?,
+                    successor_id: row.get(1)?,
+                })
+            })
+            .map_err(|e| Error::Db(format!("viz_data edges query: {e}")))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::Db(format!("viz_data edges row: {e}")))?;
+
+        Ok((nodes, edges))
+    }
+
     fn query_predecessors(&self, node_id: &str) -> Result<Vec<NodeId>> {
         let mut stmt = self
             .conn

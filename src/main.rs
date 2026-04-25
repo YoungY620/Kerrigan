@@ -165,6 +165,19 @@ fn run(command: Command) -> kerrigan::Result<()> {
         Command::Watch { task_id, interval } => {
             kerrigan::watch::run(&task_id, interval)?;
         }
+        Command::Viz {
+            port,
+            host,
+            static_dir,
+        } => {
+            let dir = if static_dir.is_empty() {
+                let home = std::env::var("HOME").unwrap_or_default();
+                std::path::PathBuf::from(home).join(".kerrigan").join("viz")
+            } else {
+                std::path::PathBuf::from(static_dir)
+            };
+            kerrigan::viz::run(&host, port, dir)?;
+        }
     }
 
     Ok(())

@@ -107,6 +107,23 @@ pub struct ProcessEntry {
     pub status: ProcessStatus,
 }
 
+// ── Viz types ──
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VizNodeData {
+    pub id: NodeId,
+    pub summary: String,
+    pub status: NodeStatus,
+    pub result_summary: Option<String>,
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VizEdgeData {
+    pub predecessor_id: NodeId,
+    pub successor_id: NodeId,
+}
+
 // ── Node messages ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

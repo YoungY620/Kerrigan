@@ -115,6 +115,25 @@ pub enum Command {
         interval: u64,
     },
 
+    /// Start the DAG visualization web server
+    #[command(
+        long_about = "Start a web server that visualizes all DAG tasks.\n\
+            Serves the frontend at http://<host>:<port> and the API at /api/tasks.\n\
+            Static files are read from <static-dir> (default: ./viz/out).\n\
+            Run 'make viz-build' first to build the frontend."
+    )]
+    Viz {
+        /// Port to listen on
+        #[arg(short, long, default_value = "7070")]
+        port: u16,
+        /// Host/IP to bind (0.0.0.0 for all interfaces)
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+        /// Path to the built frontend static files (default: ~/.kerrigan/viz)
+        #[arg(long, default_value = "")]
+        static_dir: String,
+    },
+
     /// Show task/DAG status overview
     #[command(long_about = "Show status overview.\n\
             Without arguments: lists all registered tasks.\n\

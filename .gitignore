@@ -1,3 +1,6 @@
 kerrigan-local-token
 .claude/
 target/
+viz/node_modules/
+viz/.next/
+viz/out/

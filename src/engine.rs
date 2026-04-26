@@ -171,6 +171,13 @@ impl TaskEngine {
             .unchecked_transaction()
             .map_err(|e| Error::Db(format!("add_node tx: {e}")))?;
 
+        // ── Contract validation (syntax + bijection + output schema presence) ──
+        validate_contract(
+            &new_node.contract,
+            &new_node.summary,
+            &depends_on,
+        )?;
+
         // Validate predecessors exist
         for dep_id in &depends_on {
             let exists: bool = tx
@@ -843,6 +850,94 @@ fn validate_transition(node_id: &str, from: NodeStatus, to: NodeStatus) -> Resul
     }
 }
 
+// ── Contract validation ──────────────────────────────────────────────────────
+
+/// Validate a node contract at dag-add time.
+///
+/// Checks (in order):
+/// 1. output schema is present and syntactically valid JSON Schema
+/// 2. predecessor map keys ↔ depends_on are in bijection (one-to-one)
+/// 3. each predecessor schema is syntactically valid JSON Schema
+fn validate_contract(
+    contract: &crate::model::NodeContract,
+    node_summary: &str,
+    depends_on: &[NodeId],
+) -> Result<()> {
+    let mut errors: Vec<String> = Vec::new();
+
+    // 1. output.schema must be present and valid
+    match &contract.output {
+        None => errors.push("output schema is required".to_string()),
+        Some(schema) => {
+            if let Err(e) = validate_schema_syntax(schema) {
+                errors.push(format!("output schema: {e}"));
+            }
+        }
+    }
+
+    // 2. Bijection check between predecessor map and depends_on
+    let pred_map = contract.predecessor.as_ref();
+    let dep_set: std::collections::HashSet<&str> =
+        depends_on.iter().map(|s| s.as_str()).collect();
+
+    if depends_on.is_empty() {
+        // Root node: no predecessor map needed (or it must be empty)
+        if let Some(map) = pred_map {
+            if !map.is_empty() {
+                errors.push(
+                    "predecessor map must be empty when --depends-on is empty".to_string(),
+                );
+            }
+        }
+    } else {
+        match pred_map {
+            None => errors.push(format!(
+                "predecessor map is required when --depends-on is non-empty; \
+                 missing schemas for: {:?}",
+                depends_on
+            )),
+            Some(map) => {
+                // Keys in map but not in depends_on
+                for key in map.keys() {
+                    if !dep_set.contains(key.as_str()) {
+                        errors.push(format!(
+                            "predecessor key '{key}' is not in --depends-on list"
+                        ));
+                    }
+                }
+                // Keys in depends_on but not in map
+                for dep in depends_on {
+                    if !map.contains_key(dep) {
+                        errors.push(format!(
+                            "predecessor '{dep}' has no schema in predecessor map"
+                        ));
+                    }
+                }
+                // 3. Each predecessor schema must be syntactically valid
+                for (pred_id, schema) in map {
+                    if let Err(e) = validate_schema_syntax(schema) {
+                        errors.push(format!("predecessor.{pred_id}: {e}"));
+                    }
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::InvalidContract {
+            node_summary: node_summary.to_string(),
+            details: errors.join("\n  "),
+        })
+    }
+}
+
+/// Check that a JSON value is a syntactically valid JSON Schema (Draft 2020-12).
+fn validate_schema_syntax(schema: &serde_json::Value) -> std::result::Result<(), String> {
+    jsonschema::Validator::new(schema).map(|_| ()).map_err(|e| e.to_string())
+}
+
 fn now_iso() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -864,8 +959,9 @@ mod tests {
     }
 
     fn add(e: &TaskEngine, summary: &str, deps: &[&str], succs: &[&str]) -> NodeId {
+        let contract = test_contract(deps);
         e.add_node(
-            NewNode { summary: summary.into(), description: String::new(), contract: NodeContract::default() },
+            NewNode { summary: summary.into(), description: String::new(), contract },
             deps.iter().map(|s| s.to_string()).collect(),
             succs.iter().map(|s| s.to_string()).collect(),
         )
@@ -878,11 +974,34 @@ mod tests {
         deps: &[&str],
         succs: &[&str],
     ) -> Result<NodeId> {
+        let contract = test_contract(deps);
         e.add_node(
-            NewNode { summary: summary.into(), description: String::new(), contract: NodeContract::default() },
+            NewNode { summary: summary.into(), description: String::new(), contract },
             deps.iter().map(|s| s.to_string()).collect(),
             succs.iter().map(|s| s.to_string()).collect(),
         )
+    }
+
+    /// Build a minimal valid contract for test nodes.
+    fn test_contract(deps: &[&str]) -> NodeContract {
+        let predecessor = if deps.is_empty() {
+            None
+        } else {
+            Some(
+                deps.iter()
+                    .map(|id| {
+                        (
+                            id.to_string(),
+                            serde_json::json!({"type":"object","properties":{"result":{"type":"string"}}}),
+                        )
+                    })
+                    .collect(),
+            )
+        };
+        NodeContract {
+            predecessor,
+            output: Some(serde_json::json!({"type":"object","properties":{"result":{"type":"string"}}})),
+        }
     }
 
     fn status(e: &TaskEngine, id: &str) -> NodeStatus {
@@ -1733,5 +1852,161 @@ mod tests {
 
         succeed(&e, &n);
         assert_eq!(status(&e, &s), NodeStatus::Ready); // cascade_ready
+    }
+
+    // ── validate_contract (syntax + bijection) ────────────────────────────────
+
+    fn valid_output_schema() -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {"result": {"type": "string"}}})
+    }
+
+    fn valid_pred_schema() -> serde_json::Value {
+        serde_json::json!({"type": "object", "required": ["result"], "properties": {"result": {"type": "string"}}})
+    }
+
+    fn contract_for_deps(deps: &[&str]) -> NodeContract {
+        let predecessor = if deps.is_empty() {
+            None
+        } else {
+            let map = deps
+                .iter()
+                .map(|id| (id.to_string(), valid_pred_schema()))
+                .collect();
+            Some(map)
+        };
+        NodeContract {
+            predecessor,
+            output: Some(valid_output_schema()),
+        }
+    }
+
+    #[test]
+    fn contract_valid_root_node() {
+        let c = NodeContract { predecessor: None, output: Some(valid_output_schema()) };
+        assert!(validate_contract(&c, "N", &[]).is_ok());
+    }
+
+    #[test]
+    fn contract_missing_output_schema_is_error() {
+        let c = NodeContract { predecessor: None, output: None };
+        let err = validate_contract(&c, "N", &[]).unwrap_err();
+        assert!(matches!(err, Error::InvalidContract { .. }));
+    }
+
+    #[test]
+    fn contract_invalid_output_schema_syntax() {
+        // "required" must be an array of strings, not a plain string
+        let c = NodeContract {
+            predecessor: None,
+            output: Some(serde_json::json!({"required": "not-an-array"})),
+        };
+        let err = validate_contract(&c, "N", &[]).unwrap_err();
+        let Error::InvalidContract { details, .. } = err else { panic!("wrong variant") };
+        assert!(details.contains("output schema"), "details: {details}");
+    }
+
+    #[test]
+    fn contract_predecessor_map_key_not_in_depends_on() {
+        let c = NodeContract {
+            predecessor: Some([("bad-id".to_string(), valid_pred_schema())].into()),
+            output: Some(valid_output_schema()),
+        };
+        let err = validate_contract(&c, "N", &["dep-a".to_string()]).unwrap_err();
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("bad-id"), "details: {details}");
+    }
+
+    #[test]
+    fn contract_depends_on_not_covered_by_predecessor_map() {
+        let c = NodeContract {
+            predecessor: Some([("dep-a".to_string(), valid_pred_schema())].into()),
+            output: Some(valid_output_schema()),
+        };
+        // depends_on has dep-a AND dep-b, but map only has dep-a
+        let err = validate_contract(&c, "N", &["dep-a".to_string(), "dep-b".to_string()])
+            .unwrap_err();
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("dep-b"), "details: {details}");
+    }
+
+    #[test]
+    fn contract_predecessor_map_present_without_depends_on_is_error() {
+        let c = NodeContract {
+            predecessor: Some([("x".to_string(), valid_pred_schema())].into()),
+            output: Some(valid_output_schema()),
+        };
+        let err = validate_contract(&c, "N", &[]).unwrap_err();
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("empty"), "details: {details}");
+    }
+
+    #[test]
+    fn contract_invalid_predecessor_schema_syntax() {
+        // "properties" must be an object, not a number
+        let c = NodeContract {
+            predecessor: Some([("dep".to_string(), serde_json::json!({"properties": 42}))].into()),
+            output: Some(valid_output_schema()),
+        };
+        let err = validate_contract(&c, "N", &["dep".to_string()]).unwrap_err();
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("predecessor.dep"), "details: {details}");
+    }
+
+    #[test]
+    fn contract_valid_with_predecessor() {
+        let c = contract_for_deps(&["dep-a", "dep-b"]);
+        assert!(validate_contract(&c, "N", &["dep-a".to_string(), "dep-b".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn add_node_with_valid_contract_stores_it() {
+        let (e, _d) = eng();
+        let dep = add_with_contract(&e, "dep", &[], &[], None);
+        let n_contract = contract_for_deps(&[&dep]);
+        let n = e.add_node(
+            NewNode {
+                summary: "N".into(),
+                description: String::new(),
+                contract: n_contract.clone(),
+            },
+            vec![dep.clone()],
+            vec![],
+        ).unwrap();
+        let node = e.get_node(&n).unwrap();
+        assert!(node.contract.is_some());
+        assert!(node.contract.unwrap().output.is_some());
+    }
+
+    #[test]
+    fn add_node_missing_output_schema_is_rejected() {
+        let (e, _d) = eng();
+        let c = NodeContract { predecessor: None, output: None };
+        let err = e.add_node(
+            NewNode { summary: "N".into(), description: String::new(), contract: c },
+            vec![],
+            vec![],
+        ).unwrap_err();
+        assert!(matches!(err, Error::InvalidContract { .. }));
+    }
+
+    /// Add a node supplying an explicit contract (for tests that need full control).
+    fn add_with_contract(
+        e: &TaskEngine,
+        summary: &str,
+        deps: &[&str],
+        succs: &[&str],
+        contract: Option<NodeContract>,
+    ) -> NodeId {
+        let c = contract.unwrap_or_else(|| NodeContract {
+            predecessor: if deps.is_empty() { None } else {
+                Some(deps.iter().map(|id| (id.to_string(), valid_pred_schema())).collect())
+            },
+            output: Some(valid_output_schema()),
+        });
+        e.add_node(
+            NewNode { summary: summary.into(), description: String::new(), contract: c },
+            deps.iter().map(|s| s.to_string()).collect(),
+            succs.iter().map(|s| s.to_string()).collect(),
+        ).unwrap()
     }
 }

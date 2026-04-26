@@ -149,11 +149,14 @@ fn dag_add_with_description() {
 #[test]
 fn dag_add_depends_on_not_found() {
     let (home, task) = setup();
+    // Supply a contract that covers the bad-node-id predecessor (bijection OK),
+    // so the contract passes and the node-existence check fires → not found
+    let contract = contract_with_pred("bad-node-id");
     kerrigan(&home)
         .args([
             "dag", "add", "--task", &task,
             "--summary", "n", "--depends-on", "bad-node-id",
-            "--contract", CONTRACT_ROOT,
+            "--contract", &contract,
         ])
         .assert()
         .failure()

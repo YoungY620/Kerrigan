@@ -137,6 +137,34 @@ pub enum Command {
         static_dir: String,
     },
 
+    /// Override contract validation for a running node
+    ///
+    /// Use when execution succeeded but the output.schema declared at node creation
+    /// was wrong. Bypasses schema validation, marks the node as succeeded, and
+    /// records the violation in schema_validation_log for reflect analysis.
+    ///
+    /// Requires: node is Running AND has a prior schema validation failure on record.
+    #[command(
+        long_about = "Mark a Running node as succeeded, bypassing its output.schema validation.\n\n\
+            Use ONLY when the node's execution was correct but the contract declared at\n\
+            dag-add time was wrong. The schema violation is logged for future analysis.\n\n\
+            Preconditions:\n\
+              1. Node must be in Running status\n\
+              2. schema_validation_log must have a 'fail' record for this node\n\n\
+            Returns: {\"data\": {\"ok\": true, \"node_id\": \"...\"}}"
+    )]
+    Override {
+        /// Task ID containing the node
+        #[arg(long)]
+        task: String,
+        /// Node ID to override
+        #[arg(long)]
+        node: String,
+        /// Actual result to store as result_summary (may not match output.schema)
+        #[arg(long)]
+        result_summary: String,
+    },
+
     /// Show task/DAG status overview
     #[command(long_about = "Show status overview.\n\
             Without arguments: lists all registered tasks.\n\

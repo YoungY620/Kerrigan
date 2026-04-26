@@ -561,6 +561,77 @@ impl TaskEngine {
         Ok(())
     }
 
+    // ── Override (contract bypass) ──
+
+    /// Mark a Running node as succeeded, bypassing output.schema validation.
+    ///
+    /// Preconditions (both enforced):
+    /// 1. Node must be in Running status
+    /// 2. schema_validation_log must have a 'fail' record for this node
+    ///
+    /// On success: node → succeeded, result_summary stored, schema_validation_log
+    /// gets an 'override' record, cascade_ready fires for successors.
+    pub fn override_node(&self, node_id: &str, result_summary: &str) -> Result<()> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| Error::Db(format!("override_node tx: {e}")))?;
+
+        // 1. Node must be Running
+        let status_str: String = tx
+            .query_row(
+                "SELECT status FROM nodes WHERE id = ?1",
+                params![node_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| Error::NodeNotFound(node_id.to_string()))?;
+        let from = parse_status(&status_str)?;
+        if from != NodeStatus::Running {
+            return Err(Error::InvalidStateTransition {
+                node_id: node_id.to_string(),
+                from,
+                to: NodeStatus::Succeeded,
+            });
+        }
+
+        // 2. Must have a prior schema validation failure
+        let fail_count: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM schema_validation_log WHERE node_id = ?1 AND result = 'fail'",
+                params![node_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| Error::Db(format!("override_node check fail log: {e}")))?;
+        if fail_count == 0 {
+            return Err(Error::Db(format!(
+                "node '{node_id}' has no schema validation failure on record; \
+                 use 'dag update --status succeeded' instead"
+            )));
+        }
+
+        // 3. Write: mark succeeded + store result_summary
+        tx.execute(
+            "UPDATE nodes SET status = 'succeeded', result_summary = ?1 WHERE id = ?2",
+            params![result_summary, node_id],
+        )
+        .map_err(|e| Error::Db(format!("override_node update: {e}")))?;
+
+        // 4. Log the override
+        tx.execute(
+            "INSERT INTO schema_validation_log (node_id, phase, result, details, created_at) \
+             VALUES (?1, 'runtime', 'override', 'operator override via dag override command', ?2)",
+            params![node_id, now_iso()],
+        )
+        .map_err(|e| Error::Db(format!("override_node log: {e}")))?;
+
+        // 5. cascade_ready for successors
+        cascade_ready_sql(&tx)?;
+
+        tx.commit()
+            .map_err(|e| Error::Db(format!("override_node commit: {e}")))?;
+        Ok(())
+    }
+
     // ── Message queue ──
 
     pub fn message_enqueue(&self, node_id: &str, content: &str) -> Result<()> {
@@ -2070,6 +2141,80 @@ mod tests {
 
         succeed(&e, &n);
         assert_eq!(status(&e, &s), NodeStatus::Ready); // cascade_ready
+    }
+
+    // ── override_node ─────────────────────────────────────────────────────────
+
+    fn make_schema_fail(e: &TaskEngine, node_id: &str) {
+        // Write a fake 'fail' record to schema_validation_log so override_node can proceed
+        e.conn
+            .execute(
+                "INSERT INTO schema_validation_log (node_id, phase, result, details, created_at) \
+                 VALUES (?1, 'runtime', 'fail', 'test-injected failure', '0')",
+                params![node_id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn override_node_succeeds_and_cascades() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        let s = add(&e, "S", &[&n], &[]);
+        run(&e, &n);
+        make_schema_fail(&e, &n);
+
+        e.override_node(&n, r#"{"result":"overridden"}"#).unwrap();
+        assert_eq!(status(&e, &n), NodeStatus::Succeeded);
+        // cascade_ready should fire → s becomes ready
+        assert_eq!(status(&e, &s), NodeStatus::Ready);
+    }
+
+    #[test]
+    fn override_node_stores_result_summary() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
+        make_schema_fail(&e, &n);
+        e.override_node(&n, "any content allowed").unwrap();
+        let node = e.get_node(&n).unwrap();
+        assert_eq!(node.metadata.result_summary.as_deref(), Some("any content allowed"));
+    }
+
+    #[test]
+    fn override_node_logs_override_in_validation_log() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
+        make_schema_fail(&e, &n);
+        e.override_node(&n, "ok").unwrap();
+        let count: i64 = e.conn.query_row(
+            "SELECT count(*) FROM schema_validation_log WHERE node_id = ?1 AND result = 'override'",
+            params![&n],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn override_node_rejected_without_prior_fail_record() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
+        // No schema_validation_log fail record → should be rejected
+        let err = e.override_node(&n, "ok").unwrap_err();
+        assert!(matches!(err, Error::Db(_)));
+        assert_eq!(status(&e, &n), NodeStatus::Running); // no change
+    }
+
+    #[test]
+    fn override_node_rejected_if_not_running() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        // Node is Ready (not Running) → should be rejected
+        make_schema_fail(&e, &n);
+        let err = e.override_node(&n, "ok").unwrap_err();
+        assert!(matches!(err, Error::InvalidStateTransition { .. }));
     }
 
     // ── validate_update_schemas (runtime) ─────────────────────────────────────

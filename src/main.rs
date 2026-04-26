@@ -121,6 +121,18 @@ fn run(command: Command) -> kerrigan::Result<()> {
             }
         }
 
+        Command::Override {
+            task,
+            node,
+            result_summary,
+        } => {
+            let reg = RegistryEngine::default_root()?;
+            let task_dir = reg.task_dir(&task);
+            let te = kerrigan::TaskEngine::open(&task_dir)?;
+            te.override_node(&node, &result_summary)?;
+            output_json(serde_json::json!({"ok": true, "node_id": node}));
+        }
+
         Command::Status { task_id } => {
             let reg = RegistryEngine::default_root()?;
             if let Some(id) = task_id {

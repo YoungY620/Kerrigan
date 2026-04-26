@@ -462,3 +462,113 @@ fn error_goes_to_stderr_as_json() {
         serde_json::from_str(to_parse).expect("stderr should be valid JSON");
     assert!(json.get("error").is_some(), "error key should be present");
 }
+
+// ── contract validation (CLI) ─────────────────────────────────────────────────
+
+#[test]
+fn dag_add_missing_contract_is_error() {
+    let (home, task) = setup();
+    // --contract is required; omitting it should cause a parse/missing-arg error
+    let out = kerrigan(&home)
+        .args(["dag", "add", "--task", &task, "--summary", "no-contract"])
+        .output()
+        .unwrap();
+    // clap will fail with "required argument" error
+    assert!(!out.status.success());
+}
+
+#[test]
+fn dag_add_invalid_contract_json_is_error() {
+    let (home, task) = setup();
+    kerrigan(&home)
+        .args([
+            "dag", "add", "--task", &task,
+            "--summary", "bad-contract",
+            "--contract", "{not valid json",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("error")); // json parse error
+}
+
+#[test]
+fn dag_add_contract_missing_output_schema_is_error() {
+    let (home, task) = setup();
+    // Valid JSON but missing output.schema
+    kerrigan(&home)
+        .args([
+            "dag", "add", "--task", &task,
+            "--summary", "no-output",
+            "--contract", r#"{"predecessor":null}"#,
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("output schema is required"));
+}
+
+#[test]
+fn dag_add_contract_bijection_missing_predecessor_schema_is_error() {
+    let (home, task) = setup();
+    let a = add_node(&home, &task, "A", &[]);
+    // Depends on A but predecessor map is empty
+    let bad_contract = format!(
+        r#"{{"predecessor":{{}},"output":{{"type":"object","required":["result"],"properties":{{"result":{{"type":"string"}}}}}}}}"#
+    );
+    kerrigan(&home)
+        .args([
+            "dag", "add", "--task", &task,
+            "--summary", "bad-bijection",
+            "--depends-on", &a,
+            "--contract", &bad_contract,
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("has no schema in predecessor map"));
+}
+
+// ── runtime validation (CLI) ──────────────────────────────────────────────────
+
+#[test]
+fn dag_update_bad_json_result_summary_is_error() {
+    let (home, task) = setup();
+    let n = add_node(&home, &task, "N", &[]);
+    // result_summary is not valid JSON → schema validation fails
+    let input = format!(
+        "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"not json\"}}}}]"
+    );
+    kerrigan(&home)
+        .args(["dag", "update", "--task", &task, "--input", &input])
+        .assert()
+        .failure()
+        .stderr(contains("output schema validation failed"));
+}
+
+#[test]
+fn dag_update_missing_required_field_is_error() {
+    let (home, task) = setup();
+    let n = add_node(&home, &task, "N", &[]);
+    // JSON but missing "result" field
+    let input = format!(
+        "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"wrong\\\":\\\"field\\\"}}\"}}}}]"
+    );
+    kerrigan(&home)
+        .args(["dag", "update", "--task", &task, "--input", &input])
+        .assert()
+        .failure()
+        .stderr(contains("output schema validation failed"));
+}
+
+#[test]
+fn dag_update_error_message_includes_override_hint() {
+    let (home, task) = setup();
+    let n = add_node(&home, &task, "N", &[]);
+    let input = format!(
+        "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"bad\"}}}}]"
+    );
+    let err_out = kerrigan(&home)
+        .args(["dag", "update", "--task", &task, "--input", &input])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&err_out.stderr);
+    assert!(stderr.contains("dag override"), "error should mention dag override: {stderr}");
+}

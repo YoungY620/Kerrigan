@@ -5,14 +5,16 @@ use tempfile::TempDir;
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 /// Minimal valid contract with no predecessors and a simple output schema.
+/// Declares "result" as required so subsumption checks pass when this node
+/// is used as a predecessor with contract_with_pred().
 const CONTRACT_ROOT: &str =
-    r#"{"output":{"type":"object","properties":{"result":{"type":"string"}}}}"#;
+    r#"{"output":{"type":"object","required":["result"],"properties":{"result":{"type":"string"}}}}"#;
 
 /// Minimal valid contract for a node with one predecessor: requires the predecessor
 /// to have a "result" string field; promises its own "result" field.
 fn contract_with_pred(pred_id: &str) -> String {
     format!(
-        r#"{{"predecessor":{{"{pred_id}":{{"type":"object","required":["result"],"properties":{{"result":{{"type":"string"}}}}}}}},"output":{{"type":"object","properties":{{"result":{{"type":"string"}}}}}}}}"#
+        r#"{{"predecessor":{{"{pred_id}":{{"type":"object","required":["result"],"properties":{{"result":{{"type":"string"}}}}}}}},"output":{{"type":"object","required":["result"],"properties":{{"result":{{"type":"string"}}}}}}}}"#
     )
 }
 

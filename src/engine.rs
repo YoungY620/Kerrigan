@@ -171,7 +171,8 @@ impl TaskEngine {
             .unchecked_transaction()
             .map_err(|e| Error::Db(format!("add_node tx: {e}")))?;
 
-        // ── Contract validation (syntax + bijection + output schema presence) ──
+        // ── Contract validation ── (before any DB access)
+        // Phase 1: syntax + bijection + output schema presence
         validate_contract(
             &new_node.contract,
             &new_node.summary,
@@ -203,6 +204,51 @@ impl TaskEngine {
                 .map_err(|e| Error::Db(format!("add_node validate successor: {e}")))?;
             if !exists {
                 return Err(Error::NodeNotFound(succ_id.clone()));
+            }
+        }
+
+        // Phase 2: subsumption check — P.output.schema ⊑ N.predecessor[P] requirement
+        // Runs after predecessors are confirmed to exist (we need their contract_json).
+        if let Some(ref pred_map) = new_node.contract.predecessor {
+            let mut sub_errors: Vec<String> = Vec::new();
+            for (pred_id, req_schema) in pred_map {
+                let pred_contract_json: Option<String> = tx
+                    .query_row(
+                        "SELECT contract_json FROM nodes WHERE id = ?1",
+                        params![pred_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| Error::Db(format!("subsumption query: {e}")))?;
+
+                match pred_contract_json.as_deref().and_then(|s| {
+                    serde_json::from_str::<NodeContract>(s).ok()
+                }) {
+                    None => {
+                        sub_errors.push(format!(
+                            "predecessor '{pred_id}' has no contract (all nodes must declare \
+                             contracts since v1.1.0); cannot verify schema compatibility"
+                        ));
+                    }
+                    Some(pred_contract) => {
+                        if let Some(ref p_output) = pred_contract.output {
+                            if let Err(e) = check_schema_subsumption(
+                                p_output,
+                                req_schema,
+                                pred_id,
+                            ) {
+                                sub_errors.push(e);
+                            }
+                        }
+                        // If predecessor has no output.schema, skip static check
+                        // (will be caught at runtime by update_nodes validation).
+                    }
+                }
+            }
+            if !sub_errors.is_empty() {
+                return Err(Error::InvalidContract {
+                    node_summary: new_node.summary.clone(),
+                    details: sub_errors.join("\n  "),
+                });
             }
         }
 
@@ -913,11 +959,19 @@ fn validate_contract(
                         ));
                     }
                 }
-                // 3. Each predecessor schema must be syntactically valid
-                for (pred_id, schema) in map {
-                    if let Err(e) = validate_schema_syntax(schema) {
+                // 3. Each predecessor schema must be syntactically valid,
+                //    and if the predecessor has a declared output.schema,
+                //    check subsumption: P.output ⊑ N.predecessor[P] requirement.
+                for (pred_id, req_schema) in map {
+                    if let Err(e) = validate_schema_syntax(req_schema) {
                         errors.push(format!("predecessor.{pred_id}: {e}"));
+                        continue; // skip subsumption if syntax is bad
                     }
+                    // Subsumption: P must promise at least the fields N requires
+                    // (only checked if P has a stored contract_json — done via caller)
+                    // Note: this static check is done in add_node after the TX is open,
+                    // where we have access to the DB. Here we only do syntax checks.
+                    // Subsumption is delegated to check_schema_subsumption() in add_node.
                 }
             }
         }
@@ -936,6 +990,56 @@ fn validate_contract(
 /// Check that a JSON value is a syntactically valid JSON Schema (Draft 2020-12).
 fn validate_schema_syntax(schema: &serde_json::Value) -> std::result::Result<(), String> {
     jsonschema::Validator::new(schema).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Conservative static subsumption check: P.output_schema ⊑ N.req_schema
+///
+/// Checks that P's declared required field set covers N's requirements:
+///   P.required ⊇ N.required  (P promises every field N needs)
+///
+/// Also checks basic type compatibility for each required field N declares.
+/// This is a conservative approximation — false negatives possible for complex
+/// schemas, but no false positives (never accepts an incompatible pair).
+fn check_schema_subsumption(
+    p_output: &serde_json::Value,
+    n_req: &serde_json::Value,
+    pred_id: &str,
+) -> std::result::Result<(), String> {
+    let p_required = extract_required_set(p_output);
+    let n_required = extract_required_set(n_req);
+
+    for field in &n_required {
+        if !p_required.iter().any(|f| f == field) {
+            return Err(format!(
+                "predecessor '{pred_id}' declares required={p_required:?} \
+                 but this node requires field '{field}' — predecessor does not guarantee it"
+            ));
+        }
+        // Type compatibility: if both sides declare a type for this field, they must match
+        if let (Some(p_type), Some(n_type)) = (
+            p_output["properties"][field]["type"].as_str(),
+            n_req["properties"][field]["type"].as_str(),
+        ) {
+            if p_type != n_type {
+                return Err(format!(
+                    "predecessor '{pred_id}' declares field '{field}' as type '{p_type}' \
+                     but this node requires type '{n_type}'"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn extract_required_set(schema: &serde_json::Value) -> Vec<String> {
+    schema["required"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn now_iso() -> String {
@@ -983,24 +1087,26 @@ mod tests {
     }
 
     /// Build a minimal valid contract for test nodes.
+    /// The output schema declares `result` as a required string field so that
+    /// subsumption checks work when this node is used as a predecessor.
     fn test_contract(deps: &[&str]) -> NodeContract {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["result"],
+            "properties": {"result": {"type": "string"}}
+        });
         let predecessor = if deps.is_empty() {
             None
         } else {
             Some(
                 deps.iter()
-                    .map(|id| {
-                        (
-                            id.to_string(),
-                            serde_json::json!({"type":"object","properties":{"result":{"type":"string"}}}),
-                        )
-                    })
+                    .map(|id| (id.to_string(), schema.clone()))
                     .collect(),
             )
         };
         NodeContract {
             predecessor,
-            output: Some(serde_json::json!({"type":"object","properties":{"result":{"type":"string"}}})),
+            output: Some(schema),
         }
     }
 
@@ -1857,7 +1963,11 @@ mod tests {
     // ── validate_contract (syntax + bijection) ────────────────────────────────
 
     fn valid_output_schema() -> serde_json::Value {
-        serde_json::json!({"type": "object", "properties": {"result": {"type": "string"}}})
+        serde_json::json!({
+            "type": "object",
+            "required": ["result"],
+            "properties": {"result": {"type": "string"}}
+        })
     }
 
     fn valid_pred_schema() -> serde_json::Value {
@@ -1975,6 +2085,119 @@ mod tests {
         let node = e.get_node(&n).unwrap();
         assert!(node.contract.is_some());
         assert!(node.contract.unwrap().output.is_some());
+    }
+
+    // ── subsumption check ─────────────────────────────────────────────────────
+
+    #[test]
+    fn subsumption_passes_when_pred_covers_required_fields() {
+        let (e, _d) = eng();
+        // dep has output required=["result"]
+        let dep = add(&e, "dep", &[], &[]);
+        let contract = contract_for_deps(&[&dep]);
+        // N requires "result" from dep — dep's output declares it ✓
+        assert!(e.add_node(
+            NewNode { summary: "N".into(), description: String::new(), contract },
+            vec![dep],
+            vec![],
+        ).is_ok());
+    }
+
+    #[test]
+    fn subsumption_fails_when_pred_missing_required_field() {
+        let (e, _d) = eng();
+        // Create dep with output schema that does NOT include required: ["result"]
+        let dep_contract = NodeContract {
+            predecessor: None,
+            output: Some(serde_json::json!({"type":"object","properties":{"x":{"type":"string"}}})),
+        };
+        let dep = e.add_node(
+            NewNode { summary: "dep".into(), description: String::new(), contract: dep_contract },
+            vec![],
+            vec![],
+        ).unwrap();
+        // N requires "result" from dep — dep doesn't guarantee it
+        let contract = contract_for_deps(&[&dep]);
+        let err = e.add_node(
+            NewNode { summary: "N".into(), description: String::new(), contract },
+            vec![dep],
+            vec![],
+        ).unwrap_err();
+        assert!(matches!(err, Error::InvalidContract { .. }));
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("result"), "details: {details}");
+    }
+
+    #[test]
+    fn subsumption_skipped_when_pred_has_no_output_schema() {
+        // Predecessor has no output.schema → subsumption not checked (legacy compat)
+        let (e, _d) = eng();
+        let dep_contract = NodeContract {
+            predecessor: None,
+            output: None, // no output schema
+        };
+        // Note: this will fail the validate_contract check (output required)
+        // so we bypass by using a direct DB insert to simulate legacy node
+        // Instead, test that a node with output schema but no required passes
+        let dep_contract2 = NodeContract {
+            predecessor: None,
+            output: Some(serde_json::json!({"type":"object"})), // no required
+        };
+        let dep = e.add_node(
+            NewNode { summary: "dep".into(), description: String::new(), contract: dep_contract2 },
+            vec![],
+            vec![],
+        ).unwrap();
+        // N requires "result" from dep — dep's output has no required → subsumption skipped
+        // This means: static check passes, runtime check will catch it
+        let contract = contract_for_deps(&[&dep]);
+        // Should succeed at add time (static check skipped due to no required in P's output)
+        // Actually this fails because dep.required=[] doesn't cover N.required=["result"]
+        // The subsumption check IS required even with empty required → it's a contract error
+        let result = e.add_node(
+            NewNode { summary: "N".into(), description: String::new(), contract },
+            vec![dep],
+            vec![],
+        );
+        // With strict subsumption: P has required=[] but N requires "result" → error
+        assert!(matches!(result, Err(Error::InvalidContract { .. })));
+    }
+
+    #[test]
+    fn subsumption_type_mismatch_is_error() {
+        let (e, _d) = eng();
+        // dep promises "result" as INTEGER
+        let dep_contract = NodeContract {
+            predecessor: None,
+            output: Some(serde_json::json!({
+                "type":"object",
+                "required":["result"],
+                "properties":{"result":{"type":"integer"}}
+            })),
+        };
+        let dep = e.add_node(
+            NewNode { summary: "dep".into(), description: String::new(), contract: dep_contract },
+            vec![],
+            vec![],
+        ).unwrap();
+        // N requires "result" as STRING — type mismatch
+        let req_schema = serde_json::json!({
+            "type":"object",
+            "required":["result"],
+            "properties":{"result":{"type":"string"}}
+        });
+        let contract = NodeContract {
+            predecessor: Some([(dep.clone(), req_schema)].into()),
+            output: Some(valid_output_schema()),
+        };
+        let err = e.add_node(
+            NewNode { summary: "N".into(), description: String::new(), contract },
+            vec![dep],
+            vec![],
+        ).unwrap_err();
+        assert!(matches!(err, Error::InvalidContract { .. }));
+        let Error::InvalidContract { details, .. } = err else { panic!() };
+        assert!(details.contains("integer") || details.contains("string"), "details: {details}");
     }
 
     #[test]

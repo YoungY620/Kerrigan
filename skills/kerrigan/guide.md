@@ -24,16 +24,16 @@ Everything else in this guide — decomposition, cross-validation, transparent d
 
 After receiving a ready node, follow this workflow:
 
-1. **Read node details**: `kerrigan-storage get --task <task-id> --node <node-id>`
-2. **Read the result_summary of all predecessor nodes**: Run `get` for each predecessor to understand upstream outputs
+1. **Read node details**: `kerrigan dag get --task <task-id> --node <node-id>`
+2. **Read the result_summary of all predecessor nodes**: Run `get` for each predecessor; parse the JSON to extract the fields you need
 3. **Determine whether predecessor information is sufficient**:
-   - Sufficient -> Proceed with execution
-   - Insufficient -> Specify what information is missing in failure_reason, **do not force execution when information is lacking**
+   - Sufficient → Proceed with execution
+   - Insufficient → Specify what information is missing in failure_reason, **do not force execution when information is lacking**
 4. **Execute the task**
 5. **Determine whether derived work is needed**:
-   - New subtasks discovered -> Create new nodes using `add`
-   - Not needed -> Continue
-6. **Write back results**: Use `update` to write status + result_summary or failure_reason
+   - New subtasks discovered → Create new nodes using `dag add` (with `--contract`)
+   - Not needed → Continue
+6. **Write back results**: Use `dag update` to write status + JSON result_summary or failure_reason
 
 ---
 
@@ -84,21 +84,54 @@ A self-contained task specification. Assume the executor knows nothing about the
 
 ## Result Feedback Conventions
 
-### result_summary Structure
+### result_summary — Must Be Valid JSON (since v1.1.0)
 
-```text
-## Execution Summary
-[One-sentence conclusion]
+`result_summary` **must be a JSON object** that satisfies the node's declared `output.schema`. Plain text is rejected.
 
-## Key Outputs
-[Specific files changed / findings / artifacts produced -- verifiable outputs]
+Wrap your content in a JSON object. The required fields are whatever you declared in `output.schema`. A typical schema and matching result:
 
-## Recommendations for Downstream Nodes
-[Information that downstream agents need to know]
+```json
+// output.schema declared at dag add:
+{
+  "type": "object",
+  "required": ["summary", "key_outputs", "limitations"],
+  "properties": {
+    "summary":     {"type": "string"},
+    "key_outputs": {"type": "array"},
+    "limitations": {"type": "string"}
+  }
+}
 
-## Known Limitations and Unfinished Items
-[Must disclose honestly: uncovered scenarios, issues temporarily worked around, skipped tests, compromises made, known but unfixed defects, TODOs/FIXMEs. Concealment is more harmful than the defect itself -- downstream nodes will operate on false assumptions]
+// Matching result_summary value (this is what you pass as a JSON string):
+{
+  "summary": "Found 3 REST endpoints requiring auth migration",
+  "key_outputs": ["/api/login", "/api/logout", "/api/refresh"],
+  "limitations": "Did not check GraphQL endpoints under src/graphql/"
+}
 ```
+
+Pass it as an escaped JSON string in the `--input` argument:
+
+```bash
+kerrigan dag update --task T --input '[{
+  "id": "<node-id>",
+  "status": "succeeded",
+  "metadata": {
+    "result_summary": "{\"summary\":\"Found 3 endpoints\",\"key_outputs\":[\"/api/login\"],\"limitations\":\"none\"}"
+  }
+}]'
+```
+
+### Recommended fields (adapt to your schema)
+
+| Field | Purpose |
+|-------|---------|
+| `summary` | One-sentence conclusion |
+| `key_outputs` | Files changed / findings / artifacts — verifiable |
+| `recommendations` | What downstream nodes need to know |
+| `limitations` | Honest disclosure: uncovered scenarios, workarounds, skipped tests, TODOs |
+
+**Must disclose everything in `limitations`**: anything omitted becomes a false assumption downstream agents act on. Concealment is more harmful than the defect itself.
 
 ### failure_reason Structure
 
@@ -158,8 +191,19 @@ This is a temporary identity description, not a permanent role assignment.
 - Prerequisite work needs to be done first
 - The main work is complete but follow-up verification/cleanup is needed
 
+**When `dag update --status succeeded` is blocked by schema validation**:
+
+Two scenarios — pick the right one:
+
+- **Option A — execution was wrong**: Fix your output to match the declared `output.schema`, then retry `dag update`.
+- **Option B — the contract was wrong at creation time** (your work was actually correct, but the schema you declared was wrong): Use `dag override` to bypass validation and record the actual result:
+  ```bash
+  kerrigan dag override --task <task-id> --node <node-id> --result-summary '{"summary":"actual result"}'
+  ```
+  This marks the node succeeded and lets downstream nodes proceed normally.
+
 **Do not**:
-- Write "I will keep trying" in failure_reason -- the node will not be re-executed
+- Write "I will keep trying" in failure_reason — the node will not be re-executed
 - Cram multiple unrelated pieces of work into a single node
 
 ---

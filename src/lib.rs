@@ -14,3 +14,6 @@ pub use error::{Error, Result};
 pub use model::*;
 pub use output::output_json;
 pub use serde_json;
+
+// Re-export jsonschema for use in tests and engine validation
+pub use jsonschema;

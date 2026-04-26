@@ -231,9 +231,12 @@ impl TaskEngine {
             if all_succeeded { "ready" } else { "pending" }
         };
 
+        let contract_json = serde_json::to_string(&new_node.contract)
+            .map_err(|e| Error::Db(format!("add_node contract serialize: {e}")))?;
+
         tx.execute(
-            "INSERT INTO nodes (id, summary, description, status) VALUES (?1, ?2, ?3, ?4)",
-            params![node_id, new_node.summary, new_node.description, status],
+            "INSERT INTO nodes (id, summary, description, status, contract_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![node_id, new_node.summary, new_node.description, status, contract_json],
         )
         .map_err(|e| Error::Db(format!("add_node insert: {e}")))?;
 
@@ -275,18 +278,19 @@ impl TaskEngine {
     }
 
     pub fn get_node(&self, node_id: &str) -> Result<Node> {
-        let (summary, description, status_str, result_summary, failure_reason): (
+        let (summary, description, status_str, result_summary, failure_reason, contract_json): (
             String,
             String,
             String,
+            Option<String>,
             Option<String>,
             Option<String>,
         ) = self
             .conn
             .query_row(
-                "SELECT summary, description, status, result_summary, failure_reason FROM nodes WHERE id = ?1",
+                "SELECT summary, description, status, result_summary, failure_reason, contract_json FROM nodes WHERE id = ?1",
                 params![node_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
             )
             .map_err(|_| Error::NodeNotFound(node_id.to_string()))?;
 
@@ -294,6 +298,9 @@ impl TaskEngine {
         let successors = self.query_successors(node_id)?;
         let session_ids = self.query_session_ids(node_id)?;
         let spawned_tasks = self.query_spawned_tasks(node_id)?;
+        let contract = contract_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok());
 
         Ok(Node {
             id: node_id.to_string(),
@@ -308,6 +315,7 @@ impl TaskEngine {
                 spawned_tasks,
                 session_ids,
             },
+            contract,
         })
     }
 
@@ -857,7 +865,7 @@ mod tests {
 
     fn add(e: &TaskEngine, summary: &str, deps: &[&str], succs: &[&str]) -> NodeId {
         e.add_node(
-            NewNode { summary: summary.into(), description: String::new() },
+            NewNode { summary: summary.into(), description: String::new(), contract: NodeContract::default() },
             deps.iter().map(|s| s.to_string()).collect(),
             succs.iter().map(|s| s.to_string()).collect(),
         )
@@ -871,7 +879,7 @@ mod tests {
         succs: &[&str],
     ) -> Result<NodeId> {
         e.add_node(
-            NewNode { summary: summary.into(), description: String::new() },
+            NewNode { summary: summary.into(), description: String::new(), contract: NodeContract::default() },
             deps.iter().map(|s| s.to_string()).collect(),
             succs.iter().map(|s| s.to_string()).collect(),
         )

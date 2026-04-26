@@ -46,6 +46,8 @@ pub struct Node {
     pub successors: Vec<NodeId>,
     pub status: NodeStatus,
     pub metadata: NodeMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract: Option<NodeContract>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +69,33 @@ impl From<&Node> for NodeSummary {
     }
 }
 
+// ── Node contract ──
+
+/// Per-node I/O contract. Required on all new nodes since v1.1.0.
+///
+/// `predecessor`: maps each predecessor node ID to the JSON Schema
+///   that its result_summary must satisfy. Keys must exactly match
+///   the `depends_on` list (bijection enforced at dag add time).
+///
+/// `output`: declares the JSON Schema that this node's result_summary
+///   must satisfy before dag update can mark it succeeded.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NodeContract {
+    /// node_id → expected JSON Schema for that predecessor's result_summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub predecessor: Option<std::collections::HashMap<String, serde_json::Value>>,
+    /// JSON Schema that this node's own result_summary must satisfy
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+}
+
 // ── Input types ──
 
 pub struct NewNode {
     pub summary: String,
     pub description: String,
+    /// Required since v1.1.0. dag add rejects nodes without a contract.
+    pub contract: NodeContract,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -224,6 +224,11 @@ pub enum DagCommand {
             help = "Comma-separated node IDs that will depend on this node (reverse dependency)"
         )]
         successor: Vec<String>,
+        /// Node I/O contract (required). JSON object with two keys:
+        ///   predecessor: { "<pred_node_id>": <JSON Schema> } — one entry per depends-on node
+        ///   output: <JSON Schema> — schema that result_summary must satisfy on success
+        #[arg(long, help = "JSON NodeContract {predecessor:{\"<id>\":<schema>,...}, output:<schema>}")]
+        contract: String,
     },
     /// List all nodes in a task's DAG
     #[command(long_about = "List all nodes in a task's DAG with summary info.\n\

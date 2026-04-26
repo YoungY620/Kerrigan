@@ -53,6 +53,18 @@ pub enum Error {
     #[error("database error: {0}")]
     Db(String),
 
+    #[error("contract violation for node '{node_summary}':\n{details}\n\nFix the --contract JSON and retry dag add.")]
+    InvalidContract { node_summary: String, details: String },
+
+    #[error(
+        "output schema validation failed for node '{node_id}':\n{validation_errors}\n\n\
+        Option A — fix result_summary to match the declared output schema, then retry:\n  \
+          kerrigan dag update --task <task> --input '[{{\"id\":\"{node_id}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"<fixed output>\"}}}}]'\n\n\
+        Option B — the contract was wrong at creation time (execution was actually correct):\n  \
+          kerrigan dag override --task <task> --node {node_id} --result-summary \"<actual output>\""
+    )]
+    OutputSchemaFailed { node_id: String, validation_errors: String },
+
     #[error(
         "no process record found for node '{0}'. The node may not have been executed yet. Start execution with 'kerrigan exec --task <task-id> --node {0}'"
     )]

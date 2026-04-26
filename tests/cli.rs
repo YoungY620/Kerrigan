@@ -4,6 +4,18 @@ use tempfile::TempDir;
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
+/// Minimal valid contract with no predecessors and a simple output schema.
+const CONTRACT_ROOT: &str =
+    r#"{"output":{"type":"object","properties":{"result":{"type":"string"}}}}"#;
+
+/// Minimal valid contract for a node with one predecessor: requires the predecessor
+/// to have a "result" string field; promises its own "result" field.
+fn contract_with_pred(pred_id: &str) -> String {
+    format!(
+        r#"{{"predecessor":{{"{pred_id}":{{"type":"object","required":["result"],"properties":{{"result":{{"type":"string"}}}}}}}},"output":{{"type":"object","properties":{{"result":{{"type":"string"}}}}}}}}"#
+    )
+}
+
 fn kerrigan(home: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("kerrigan").unwrap();
     cmd.env("HOME", home.path());
@@ -24,9 +36,16 @@ fn setup() -> (TempDir, String) {
 }
 
 /// Add a node to a task, return node_id.
+/// If args does not include --contract, CONTRACT_ROOT is appended automatically.
 fn add_node(home: &TempDir, task: &str, summary: &str, args: &[&str]) -> String {
+    let has_contract = args.iter().any(|a| *a == "--contract");
+    // Build full arg list; keep default_contract alive for the lifetime of cmd_args
+    let default_contract = CONTRACT_ROOT.to_string();
     let mut cmd_args = vec!["dag", "add", "--task", task, "--summary", summary];
     cmd_args.extend_from_slice(args);
+    if !has_contract {
+        cmd_args.extend_from_slice(&["--contract", &default_contract]);
+    }
     let out = kerrigan(home).args(&cmd_args).output().unwrap();
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     json["data"]["node_id"].as_str().unwrap().to_string()
@@ -106,7 +125,8 @@ fn task_list_shows_created_task() {
 fn dag_add_returns_node_id() {
     let (home, task) = setup();
     kerrigan(&home)
-        .args(["dag", "add", "--task", &task, "--summary", "do something"])
+        .args(["dag", "add", "--task", &task, "--summary", "do something",
+               "--contract", CONTRACT_ROOT])
         .assert()
         .success()
         .stdout(contains("node_id"));
@@ -120,6 +140,7 @@ fn dag_add_with_description() {
             "dag", "add", "--task", &task,
             "--summary", "analyze",
             "--description", "Read all files carefully",
+            "--contract", CONTRACT_ROOT,
         ])
         .assert()
         .success();
@@ -132,6 +153,7 @@ fn dag_add_depends_on_not_found() {
         .args([
             "dag", "add", "--task", &task,
             "--summary", "n", "--depends-on", "bad-node-id",
+            "--contract", CONTRACT_ROOT,
         ])
         .assert()
         .failure()
@@ -145,6 +167,7 @@ fn dag_add_successor_not_found() {
         .args([
             "dag", "add", "--task", &task,
             "--summary", "n", "--successor", "bad-node-id",
+            "--contract", CONTRACT_ROOT,
         ])
         .assert()
         .failure()
@@ -155,14 +178,17 @@ fn dag_add_successor_not_found() {
 fn dag_add_cycle_detected() {
     let (home, task) = setup();
     let a = add_node(&home, &task, "A", &[]);
-    let b = add_node(&home, &task, "B", &["--depends-on", &a]);
+    let b_contract = contract_with_pred(&a);
+    let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]);
     // Try: C depends on B, makes A its successor → B→C→A→B cycle
+    let c_contract = contract_with_pred(&b);
     kerrigan(&home)
         .args([
             "dag", "add", "--task", &task,
             "--summary", "C",
             "--depends-on", &b,
             "--successor", &a,
+            "--contract", &c_contract,
         ])
         .assert()
         .failure()
@@ -173,12 +199,14 @@ fn dag_add_cycle_detected() {
 fn dag_add_same_node_as_dep_and_successor_is_cycle() {
     let (home, task) = setup();
     let a = add_node(&home, &task, "A", &[]);
+    let n_contract = contract_with_pred(&a);
     kerrigan(&home)
         .args([
             "dag", "add", "--task", &task,
             "--summary", "N",
             "--depends-on", &a,
             "--successor", &a,
+            "--contract", &n_contract,
         ])
         .assert()
         .failure()
@@ -223,7 +251,8 @@ fn dag_list_shows_nodes() {
 fn dag_ready_shows_root_nodes() {
     let (home, task) = setup();
     let a = add_node(&home, &task, "A", &[]);
-    let b = add_node(&home, &task, "B", &["--depends-on", &a]); // pending
+    let b_contract = contract_with_pred(&a);
+    let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]); // pending
     let c = add_node(&home, &task, "C", &[]); // ready
 
     let out = kerrigan(&home)
@@ -247,7 +276,8 @@ fn dag_ready_shows_root_nodes() {
 fn dag_get_includes_predecessor_results() {
     let (home, task) = setup();
     let a = add_node(&home, &task, "A", &[]);
-    let b = add_node(&home, &task, "B", &["--depends-on", &a]);
+    let b_contract = contract_with_pred(&a);
+    let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]);
 
     let input = format!(
         "[{{\"id\":\"{a}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"A output\"}}}}]"
@@ -273,7 +303,8 @@ fn dag_get_includes_predecessor_results() {
 fn dag_update_succeeded_cascades_ready() {
     let (home, task) = setup();
     let a = add_node(&home, &task, "A", &[]);
-    let b = add_node(&home, &task, "B", &["--depends-on", &a]);
+    let b_contract = contract_with_pred(&a);
+    let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]);
 
     // B is pending initially — parse ids to avoid UUID appearing in successors list
     let ready_ids_before: Vec<String> = {
@@ -350,7 +381,8 @@ fn dag_update_cascade_pending_after_successor_added() {
     let (home, task) = setup();
     let dep = add_node(&home, &task, "dep", &[]);     // ready
     let s = add_node(&home, &task, "S", &[]);          // ready
-    add_node(&home, &task, "N", &["--depends-on", &dep, "--successor", &s]);
+    let n_contract = contract_with_pred(&dep);
+    add_node(&home, &task, "N", &["--depends-on", &dep, "--successor", &s, "--contract", &n_contract]);
 
     // S should now be pending (N is pending because dep not succeeded)
     let out = kerrigan(&home)

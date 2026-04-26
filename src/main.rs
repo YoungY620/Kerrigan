@@ -60,6 +60,7 @@ fn run(command: Command) -> kerrigan::Result<()> {
                     description,
                     depends_on,
                     successor,
+                    contract,
                 } => {
                     let task_dir = reg.task_dir(&task);
                     let te = kerrigan::TaskEngine::open(&task_dir)?;
@@ -67,10 +68,14 @@ fn run(command: Command) -> kerrigan::Result<()> {
                         depends_on.into_iter().filter(|s| !s.is_empty()).collect();
                     let succs: Vec<String> =
                         successor.into_iter().filter(|s| !s.is_empty()).collect();
+                    let parsed_contract: kerrigan::NodeContract =
+                        serde_json::from_str(&contract)
+                            .map_err(|e| kerrigan::Error::json("<contract>", e))?;
                     let id = te.add_node(
                         NewNode {
                             summary,
                             description,
+                            contract: parsed_contract,
                         },
                         deps,
                         succs,

@@ -54,7 +54,14 @@ fn add_node(home: &TempDir, task: &str, summary: &str, args: &[&str]) -> String 
 }
 
 fn update_node(home: &TempDir, task: &str, node: &str, status: &str) {
-    let input = format!("[{{\"id\":\"{node}\",\"status\":\"{status}\"}}]");
+    // When marking succeeded, provide a valid JSON result_summary matching CONTRACT_ROOT
+    let input = if status == "succeeded" {
+        format!(
+            "[{{\"id\":\"{node}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"ok\\\"}}\"}}}}]"
+        )
+    } else {
+        format!("[{{\"id\":\"{node}\",\"status\":\"{status}\"}}]")
+    };
     kerrigan(home)
         .args(["dag", "update", "--task", task, "--input", &input])
         .assert()
@@ -284,8 +291,9 @@ fn dag_get_includes_predecessor_results() {
     let b_contract = contract_with_pred(&a);
     let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]);
 
+    // result_summary must be valid JSON with "result" field (matching CONTRACT_ROOT output.schema)
     let input = format!(
-        "[{{\"id\":\"{a}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"A output\"}}}}]"
+        "[{{\"id\":\"{a}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"A output\\\"}}\"}}}}]"
     );
     kerrigan(&home)
         .args(["dag", "update", "--task", &task, "--input", &input])
@@ -365,7 +373,10 @@ fn dag_update_invalid_transition_fails() {
 fn dag_update_reads_from_stdin() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
-    let input = format!("[{{\"id\":\"{n}\",\"status\":\"succeeded\"}}]");
+    // result_summary must be valid JSON matching output.schema (required: ["result"])
+    let input = format!(
+        "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"ok\\\"}}\"}}}}]"
+    );
 
     kerrigan(&home)
         .args(["dag", "update", "--task", &task])

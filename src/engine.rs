@@ -381,11 +381,11 @@ impl TaskEngine {
         let mut newly_succeeded = Vec::new();
 
         for update in &updates {
-            let current_status: String = tx
+            let (current_status, contract_json): (String, Option<String>) = tx
                 .query_row(
-                    "SELECT status FROM nodes WHERE id = ?1",
+                    "SELECT status, contract_json FROM nodes WHERE id = ?1",
                     params![update.id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(|_| Error::NodeNotFound(update.id.clone()))?;
 
@@ -393,7 +393,19 @@ impl TaskEngine {
                 let from = parse_status(&current_status)?;
                 validate_transition(&update.id, from, new_status)?;
 
+                // ── Runtime schema validation (before any DB write) ──
                 if new_status == NodeStatus::Succeeded {
+                    let result_summary = update
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.result_summary.as_deref());
+
+                    validate_update_schemas(
+                        &tx,
+                        &update.id,
+                        contract_json.as_deref(),
+                        result_summary,
+                    )?;
                     newly_succeeded.push(update.id.clone());
                 }
 
@@ -896,6 +908,104 @@ fn validate_transition(node_id: &str, from: NodeStatus, to: NodeStatus) -> Resul
     }
 }
 
+// ── Runtime schema validation (for update_nodes) ────────────────────────────
+
+/// Called inside the update_nodes transaction when status = succeeded.
+/// Validates:
+///   1. Each predecessor's result_summary against N's predecessor[P] requirement
+///   2. N's result_summary against N's output.schema
+///
+/// Returns Err before any DB write — transaction is never committed on failure.
+fn validate_update_schemas(
+    tx: &rusqlite::Transaction<'_>,
+    node_id: &str,
+    contract_json: Option<&str>,
+    result_summary: Option<&str>,
+) -> Result<()> {
+    let contract: NodeContract = match contract_json {
+        None => {
+            return Err(Error::InvalidContract {
+                node_summary: node_id.to_string(),
+                details: "node has no contract (required since v1.1.0)".to_string(),
+            });
+        }
+        Some(s) => serde_json::from_str(s)
+            .map_err(|e| Error::Db(format!("deserialize contract: {e}")))?,
+    };
+
+    // 1. Validate predecessor outputs
+    if let Some(ref pred_map) = contract.predecessor {
+        for (pred_id, req_schema) in pred_map {
+            // Get predecessor's result_summary
+            let pred_result: Option<String> = tx
+                .query_row(
+                    "SELECT result_summary FROM nodes WHERE id = ?1",
+                    params![pred_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| Error::Db(format!("validate predecessor result: {e}")))?;
+
+            let pred_json = match pred_result.as_deref().and_then(|s| {
+                serde_json::from_str::<serde_json::Value>(s).ok()
+            }) {
+                Some(v) => v,
+                None => {
+                    return Err(Error::OutputSchemaFailed {
+                        node_id: node_id.to_string(),
+                        validation_errors: format!(
+                            "predecessor '{pred_id}': result_summary is not valid JSON \
+                             (cannot validate against schema)"
+                        ),
+                    });
+                }
+            };
+
+            // Validate predecessor's output against N's requirement for that predecessor
+            let validator = jsonschema::Validator::new(req_schema)
+                .map_err(|e| Error::Db(format!("compile pred req schema: {e}")))?;
+            let errors: Vec<String> = validator
+                .iter_errors(&pred_json)
+                .map(|e| format!("  predecessor '{pred_id}': {e}"))
+                .collect();
+            if !errors.is_empty() {
+                return Err(Error::OutputSchemaFailed {
+                    node_id: node_id.to_string(),
+                    validation_errors: errors.join("\n"),
+                });
+            }
+        }
+    }
+
+    // 2. Validate this node's own output
+    if let Some(ref output_schema) = contract.output {
+        let summary_str = result_summary.ok_or_else(|| Error::OutputSchemaFailed {
+            node_id: node_id.to_string(),
+            validation_errors: "result_summary is required when output.schema is declared".to_string(),
+        })?;
+
+        let result_json: serde_json::Value = serde_json::from_str(summary_str)
+            .map_err(|_| Error::OutputSchemaFailed {
+                node_id: node_id.to_string(),
+                validation_errors: "result_summary is not valid JSON — must be a JSON object to satisfy output.schema".to_string(),
+            })?;
+
+        let validator = jsonschema::Validator::new(output_schema)
+            .map_err(|e| Error::Db(format!("compile output schema: {e}")))?;
+        let errors: Vec<String> = validator
+            .iter_errors(&result_json)
+            .map(|e| format!("  {e}"))
+            .collect();
+        if !errors.is_empty() {
+            return Err(Error::OutputSchemaFailed {
+                node_id: node_id.to_string(),
+                validation_errors: errors.join("\n"),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 // ── Contract validation ──────────────────────────────────────────────────────
 
 /// Validate a node contract at dag-add time.
@@ -1119,7 +1229,9 @@ mod tests {
             id: id.to_string(),
             status: Some(NodeStatus::Succeeded),
             metadata: Some(NodeMetadata {
-                result_summary: Some("ok".into()),
+                // Must be valid JSON matching the test contract's output.schema
+                // ({"type":"object","required":["result"],"properties":{"result":{"type":"string"}}})
+                result_summary: Some(r#"{"result":"ok"}"#.into()),
                 ..Default::default()
             }),
         }])
@@ -1546,7 +1658,7 @@ mod tests {
         let n = add(&e, "N", &[], &[]);
         succeed(&e, &n);
         let node = e.get_node(&n).unwrap();
-        assert_eq!(node.metadata.result_summary.as_deref(), Some("ok"));
+        assert_eq!(node.metadata.result_summary.as_deref(), Some(r#"{"result":"ok"}"#));
     }
 
     // ── Error cases ───────────────────────────────────────────────────────────
@@ -1582,7 +1694,7 @@ mod tests {
                 id: a.clone(),
                 status: Some(NodeStatus::Succeeded),
                 metadata: Some(NodeMetadata {
-                    result_summary: Some("a_result".into()),
+                    result_summary: Some(r#"{"result":"a_result"}"#.into()),
                     ..Default::default()
                 }),
             },
@@ -1600,7 +1712,7 @@ mod tests {
         assert_eq!(status(&e, &b), NodeStatus::Failed);
         assert_eq!(
             e.get_node(&a).unwrap().metadata.result_summary.as_deref(),
-            Some("a_result")
+            Some(r#"{"result":"a_result"}"#)
         );
         assert_eq!(
             e.get_node(&b).unwrap().metadata.failure_reason.as_deref(),
@@ -1616,7 +1728,7 @@ mod tests {
             id: n.clone(),
             status: Some(NodeStatus::Succeeded),
             metadata: Some(NodeMetadata {
-                result_summary: Some("ok".into()),
+                result_summary: Some(r#"{"result":"ok"}"#.into()),
                 session_ids: vec!["sess-aaa".into(), "sess-bbb".into()],
                 ..Default::default()
             }),
@@ -1958,6 +2070,91 @@ mod tests {
 
         succeed(&e, &n);
         assert_eq!(status(&e, &s), NodeStatus::Ready); // cascade_ready
+    }
+
+    // ── validate_update_schemas (runtime) ─────────────────────────────────────
+
+    fn succeed_with(e: &TaskEngine, id: &str, result_summary: &str) -> Result<()> {
+        e.update_nodes(vec![NodeUpdate {
+            id: id.to_string(),
+            status: Some(NodeStatus::Succeeded),
+            metadata: Some(NodeMetadata {
+                result_summary: Some(result_summary.into()),
+                ..Default::default()
+            }),
+        }])
+    }
+
+    #[test]
+    fn runtime_validation_passes_matching_output() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        assert!(succeed_with(&e, &n, r#"{"result":"ok"}"#).is_ok());
+    }
+
+    #[test]
+    fn runtime_output_schema_fails_missing_required_field() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        // {"wrong_field":"x"} doesn't have required "result"
+        let err = succeed_with(&e, &n, r#"{"wrong_field":"x"}"#).unwrap_err();
+        assert!(matches!(err, Error::OutputSchemaFailed { .. }));
+    }
+
+    #[test]
+    fn runtime_output_schema_fails_non_json_result() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        let err = succeed_with(&e, &n, "not json at all").unwrap_err();
+        assert!(matches!(err, Error::OutputSchemaFailed { .. }));
+    }
+
+    #[test]
+    fn runtime_output_schema_fails_missing_result_summary() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        let err = e.update_nodes(vec![NodeUpdate {
+            id: n.clone(),
+            status: Some(NodeStatus::Succeeded),
+            metadata: None, // no result_summary
+        }]).unwrap_err();
+        assert!(matches!(err, Error::OutputSchemaFailed { .. }));
+    }
+
+    #[test]
+    fn runtime_predecessor_schema_fails_bad_predecessor_output() {
+        let (e, _d) = eng();
+        let dep = add(&e, "dep", &[], &[]);
+
+        // Succeed dep with WRONG output (missing "result")
+        // dep's output.schema requires "result": {"type":"string"}
+        // So succeeding dep with wrong output fails
+        let err = succeed_with(&e, &dep, r#"{"wrong":"data"}"#).unwrap_err();
+        assert!(matches!(err, Error::OutputSchemaFailed { .. }));
+    }
+
+    #[test]
+    fn runtime_validation_blocked_before_db_write() {
+        // If output validation fails, node must remain Running (no DB write)
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        run(&e, &n); // set to Running
+
+        let err = succeed_with(&e, &n, r#"{"wrong":"data"}"#).unwrap_err();
+        assert!(matches!(err, Error::OutputSchemaFailed { .. }));
+        // Node must still be Running (transaction rolled back)
+        assert_eq!(status(&e, &n), NodeStatus::Running);
+    }
+
+    #[test]
+    fn runtime_cascade_ready_fires_after_valid_update() {
+        let (e, _d) = eng();
+        let a = add(&e, "A", &[], &[]);
+        let b = add(&e, "B", &[&a], &[]);
+        assert_eq!(status(&e, &b), NodeStatus::Pending);
+        // Valid JSON output → cascade_ready fires → b becomes ready
+        succeed_with(&e, &a, r#"{"result":"done"}"#).unwrap();
+        assert_eq!(status(&e, &b), NodeStatus::Ready);
     }
 
     // ── validate_contract (syntax + bijection) ────────────────────────────────

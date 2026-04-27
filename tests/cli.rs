@@ -53,8 +53,19 @@ fn add_node(home: &TempDir, task: &str, summary: &str, args: &[&str]) -> String 
     json["data"]["node_id"].as_str().unwrap().to_string()
 }
 
+fn mark_running(home: &TempDir, task: &str, node: &str) {
+    kerrigan(home)
+        .args(["dag", "mark-running", "--task", task, "--node", node])
+        .assert()
+        .success();
+}
+
 fn update_node(home: &TempDir, task: &str, node: &str, status: &str) {
-    // When marking succeeded, provide a valid JSON result_summary matching CONTRACT_ROOT
+    // Running must be set via exec; use hidden _mark-running for tests.
+    // succeeded/failed require the node to already be running.
+    if status == "succeeded" || status == "failed" {
+        mark_running(home, task, node);
+    }
     let input = if status == "succeeded" {
         format!(
             "[{{\"id\":\"{node}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"ok\\\"}}\"}}}}]"
@@ -292,6 +303,7 @@ fn dag_get_includes_predecessor_results() {
     let b = add_node(&home, &task, "B", &["--depends-on", &a, "--contract", &b_contract]);
 
     // result_summary must be valid JSON with "result" field (matching CONTRACT_ROOT output.schema)
+    mark_running(&home, &task, &a);
     let input = format!(
         "[{{\"id\":\"{a}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"A output\\\"}}\"}}}}]"
     );
@@ -358,21 +370,21 @@ fn dag_update_succeeded_cascades_ready() {
 fn dag_update_invalid_transition_fails() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
-    update_node(&home, &task, &n, "succeeded");
 
-    // succeeded → running is invalid
+    // dag update must never set running — only exec may do so
     let input = format!("[{{\"id\":\"{n}\",\"status\":\"running\"}}]");
     kerrigan(&home)
         .args(["dag", "update", "--task", &task, "--input", &input])
         .assert()
         .failure()
-        .stderr(contains("invalid state transition"));
+        .stderr(contains("kerrigan exec"));
 }
 
 #[test]
 fn dag_update_reads_from_stdin() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
+    mark_running(&home, &task, &n);
     // result_summary must be valid JSON matching output.schema (required: ["result"])
     let input = format!(
         "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"result\\\":\\\"ok\\\"}}\"}}}}]"
@@ -532,6 +544,7 @@ fn dag_add_contract_bijection_missing_predecessor_schema_is_error() {
 fn dag_update_bad_json_result_summary_is_error() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
+    mark_running(&home, &task, &n);
     // result_summary is not valid JSON → schema validation fails
     let input = format!(
         "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"not json\"}}}}]"
@@ -547,6 +560,7 @@ fn dag_update_bad_json_result_summary_is_error() {
 fn dag_update_missing_required_field_is_error() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
+    mark_running(&home, &task, &n);
     // JSON but missing "result" field
     let input = format!(
         "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"{{\\\"wrong\\\":\\\"field\\\"}}\"}}}}]"
@@ -562,6 +576,7 @@ fn dag_update_missing_required_field_is_error() {
 fn dag_update_error_message_includes_override_hint() {
     let (home, task) = setup();
     let n = add_node(&home, &task, "N", &[]);
+    mark_running(&home, &task, &n);
     let input = format!(
         "[{{\"id\":\"{n}\",\"status\":\"succeeded\",\"metadata\":{{\"result_summary\":\"bad\"}}}}]"
     );

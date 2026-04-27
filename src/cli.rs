@@ -299,7 +299,8 @@ pub enum DagCommand {
             - id (required): node ID\n  \
             - status (optional): \"running\", \"succeeded\", or \"failed\"\n  \
             - metadata (optional): {result_summary, failure_reason, spawned_tasks, session_ids}\n\n\
-            Valid status transitions: ready->running, running->succeeded, running->failed.\n\
+            Valid status transitions: running->succeeded, running->failed.\n\
+            Note: 'running' cannot be set here — use 'kerrigan exec' instead.\n\
             Returns: {\"data\": {\"ok\": true}}",
         after_help = "EXAMPLES:\n  \
             # Mark succeeded with result:\n  \
@@ -321,5 +322,13 @@ pub enum DagCommand {
             help = "JSON array: [{\"id\":\"<node>\",\"status\":\"succeeded\",\"metadata\":{\"result_summary\":\"...\"}}]. Reads stdin if omitted"
         )]
         input: Option<String>,
+    },
+    /// Internal: atomically mark a Ready node as Running (used by tests and exec internals).
+    #[command(hide = true)]
+    MarkRunning {
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        node: String,
     },
 }

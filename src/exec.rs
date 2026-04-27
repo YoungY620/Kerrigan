@@ -59,20 +59,15 @@ pub fn run(
     fs::create_dir_all(&logs_dir).map_err(|e| Error::io(&logs_dir, e))?;
     let log_path = logs_dir.join(format!("{node_id}.jsonl"));
 
-    // Record process and mark Running
+    // Record process and mark Running (atomic — only valid path to Running status)
     let self_pid = std::process::id();
-    task_engine.process_create(
+    task_engine.mark_running(
         node_id,
         self_pid,
         &session_id,
         adapter,
         &log_path.to_string_lossy(),
     )?;
-    task_engine.update_nodes(vec![NodeUpdate {
-        id: node_id.to_string(),
-        status: Some(NodeStatus::Running),
-        metadata: None,
-    }])?;
 
     if detach {
         // Fork self, passing session_id so the child skips setup

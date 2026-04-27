@@ -381,6 +381,13 @@ impl TaskEngine {
         let mut newly_succeeded = Vec::new();
 
         for update in &updates {
+            if update.status == Some(NodeStatus::Running) {
+                return Err(Error::Db(format!(
+                    "node '{}': cannot set status=running via dag update — use kerrigan exec",
+                    update.id
+                )));
+            }
+
             let (current_status, contract_json): (String, Option<String>) = tx
                 .query_row(
                     "SELECT status, contract_json FROM nodes WHERE id = ?1",
@@ -457,6 +464,56 @@ impl TaskEngine {
 
         tx.commit()
             .map_err(|e| Error::Db(format!("update_nodes commit: {e}")))?;
+        Ok(())
+    }
+
+    // ── Exec-only transition ──
+
+    /// Atomically mark a Ready node as Running and record the exec process.
+    /// This is the only legitimate way to transition a node to Running status.
+    pub fn mark_running(
+        &self,
+        node_id: &str,
+        pid: u32,
+        session_id: &str,
+        adapter: &str,
+        log_path: &str,
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| Error::Db(format!("mark_running tx: {e}")))?;
+
+        let current_status: String = tx
+            .query_row(
+                "SELECT status FROM nodes WHERE id = ?1",
+                params![node_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| Error::NodeNotFound(node_id.to_string()))?;
+
+        if current_status != "ready" {
+            return Err(Error::InvalidStateTransition {
+                node_id: node_id.to_string(),
+                from: parse_status(&current_status)?,
+                to: NodeStatus::Running,
+            });
+        }
+
+        tx.execute(
+            "INSERT INTO processes (node_id, pid, session_id, adapter, log_path, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![node_id, pid, session_id, adapter, log_path, now_iso()],
+        )
+        .map_err(|e| Error::Db(format!("mark_running process_create: {e}")))?;
+
+        tx.execute(
+            "UPDATE nodes SET status = 'running' WHERE id = ?1",
+            params![node_id],
+        )
+        .map_err(|e| Error::Db(format!("mark_running status: {e}")))?;
+
+        tx.commit()
+            .map_err(|e| Error::Db(format!("mark_running commit: {e}")))?;
         Ok(())
     }
 
@@ -961,11 +1018,8 @@ fn parse_process_status(s: &str) -> ProcessStatus {
 fn validate_transition(node_id: &str, from: NodeStatus, to: NodeStatus) -> Result<()> {
     let valid = matches!(
         (from, to),
-        (NodeStatus::Ready, NodeStatus::Running)
-            | (NodeStatus::Running, NodeStatus::Succeeded)
+        (NodeStatus::Running, NodeStatus::Succeeded)
             | (NodeStatus::Running, NodeStatus::Failed)
-            | (NodeStatus::Ready, NodeStatus::Succeeded)
-            | (NodeStatus::Ready, NodeStatus::Failed)
     );
 
     if valid {
@@ -1295,25 +1349,20 @@ mod tests {
         e.get_node(id).unwrap().status
     }
 
+    fn run(e: &TaskEngine, id: &str) {
+        e.mark_running(id, 0, "test-session", "test", "/dev/null")
+            .unwrap();
+    }
+
     fn succeed(e: &TaskEngine, id: &str) {
+        run(e, id);
         e.update_nodes(vec![NodeUpdate {
             id: id.to_string(),
             status: Some(NodeStatus::Succeeded),
             metadata: Some(NodeMetadata {
-                // Must be valid JSON matching the test contract's output.schema
-                // ({"type":"object","required":["result"],"properties":{"result":{"type":"string"}}})
                 result_summary: Some(r#"{"result":"ok"}"#.into()),
                 ..Default::default()
             }),
-        }])
-        .unwrap();
-    }
-
-    fn run(e: &TaskEngine, id: &str) {
-        e.update_nodes(vec![NodeUpdate {
-            id: id.to_string(),
-            status: Some(NodeStatus::Running),
-            metadata: None,
         }])
         .unwrap();
     }
@@ -1542,6 +1591,7 @@ mod tests {
     fn cascade_pending_skips_failed_node() {
         let (e, _d) = eng();
         let s = add(&e, "S", &[], &[]);
+        run(&e, &s);
         e.update_nodes(vec![NodeUpdate {
             id: s.clone(),
             status: Some(NodeStatus::Failed),
@@ -1690,13 +1740,10 @@ mod tests {
     // ── update_nodes state machine ────────────────────────────────────────────
 
     #[test]
-    fn invalid_transition_rejected() {
+    fn update_nodes_rejects_running_status() {
         let (e, _d) = eng();
         let n = add(&e, "N", &[], &[]);
-        // pending → succeeded is not valid (must go through running)
-        // actually ready → succeeded IS valid per validate_transition
-        // Let's try succeeded → running
-        succeed(&e, &n);
+        // dag update must never set Running — only exec (mark_running) may do so
         let err = e
             .update_nodes(vec![NodeUpdate {
                 id: n.clone(),
@@ -1704,13 +1751,30 @@ mod tests {
                 metadata: None,
             }])
             .unwrap_err();
+        assert!(matches!(err, Error::Db(_)));
+    }
+
+    #[test]
+    fn invalid_transition_rejected() {
+        let (e, _d) = eng();
+        let n = add(&e, "N", &[], &[]);
+        // succeeded → failed is not a valid transition
+        succeed(&e, &n);
+        let err = e
+            .update_nodes(vec![NodeUpdate {
+                id: n.clone(),
+                status: Some(NodeStatus::Failed),
+                metadata: None,
+            }])
+            .unwrap_err();
         assert!(matches!(err, Error::InvalidStateTransition { .. }));
     }
 
     #[test]
-    fn ready_to_failed_is_valid() {
+    fn running_to_failed_is_valid() {
         let (e, _d) = eng();
         let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
         e.update_nodes(vec![NodeUpdate {
             id: n.clone(),
             status: Some(NodeStatus::Failed),
@@ -1760,6 +1824,8 @@ mod tests {
         let (e, _d) = eng();
         let a = add(&e, "A", &[], &[]);
         let b = add(&e, "B", &[], &[]);
+        run(&e, &a);
+        run(&e, &b);
         e.update_nodes(vec![
             NodeUpdate {
                 id: a.clone(),
@@ -1795,6 +1861,7 @@ mod tests {
     fn update_nodes_session_ids_roundtrip() {
         let (e, _d) = eng();
         let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
         e.update_nodes(vec![NodeUpdate {
             id: n.clone(),
             status: Some(NodeStatus::Succeeded),
@@ -1867,6 +1934,7 @@ mod tests {
         let dep = add(&e, "dep", &[], &[]);
         let pending = add(&e, "pending", &[&dep], &[]);
         let failed = add(&e, "failed", &[], &[]);
+        run(&e, &failed);
         e.update_nodes(vec![NodeUpdate {
             id: failed.clone(),
             status: Some(NodeStatus::Failed),
@@ -2220,6 +2288,8 @@ mod tests {
     // ── validate_update_schemas (runtime) ─────────────────────────────────────
 
     fn succeed_with(e: &TaskEngine, id: &str, result_summary: &str) -> Result<()> {
+        // Must go through Running first
+        let _ = e.mark_running(id, 0, "test-session", "test", "/dev/null");
         e.update_nodes(vec![NodeUpdate {
             id: id.to_string(),
             status: Some(NodeStatus::Succeeded),
@@ -2258,6 +2328,7 @@ mod tests {
     fn runtime_output_schema_fails_missing_result_summary() {
         let (e, _d) = eng();
         let n = add(&e, "N", &[], &[]);
+        run(&e, &n);
         let err = e.update_nodes(vec![NodeUpdate {
             id: n.clone(),
             status: Some(NodeStatus::Succeeded),

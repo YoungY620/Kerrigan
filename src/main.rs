@@ -118,6 +118,12 @@ fn run(command: Command) -> kerrigan::Result<()> {
                     te.update_nodes(updates)?;
                     output_json(serde_json::json!({"ok": true}));
                 }
+                DagCommand::MarkRunning { task, node } => {
+                    let task_dir = reg.task_dir(&task);
+                    let te = kerrigan::TaskEngine::open(&task_dir)?;
+                    te.mark_running(&node, 0, "internal", "internal", "/dev/null")?;
+                    output_json(serde_json::json!({"ok": true}));
+                }
             }
         }
 

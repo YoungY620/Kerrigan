@@ -63,43 +63,65 @@ if [ -z "$COMMITS" ]; then
     error "No commits found since last tag."
 fi
 
-# ── Auto-determine version bump ──
+# ── Auto-determine version ──
 
-# Check if there are any releasable commits (feat, fix, release, BREAKING CHANGE)
-HAS_RELEASABLE=$(echo "$COMMITS" | grep -cE "^(feat|fix|release|BREAKING CHANGE):" || true)
+# If Cargo.toml version is already ahead of last tag, use it directly.
+CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
 
-if [ "$HAS_RELEASABLE" -eq 0 ] && [ -z "${1:-}" ]; then
-    info "No releasable commits since $LAST_TAG (only docs/chore/ci/refactor/test). Skipping release."
-    exit 0
+CARGO_NUM=0
+if [ -n "$CARGO_VERSION" ]; then
+    IFS='.' read -r CM CN CP <<< "$CARGO_VERSION"
+    CARGO_NUM=$((CM * 1000000 + CN * 1000 + CP))
 fi
 
-BUMP="patch"  # default
-
-# Check for BREAKING CHANGE (major bump)
-if echo "$COMMITS" | grep -qi "BREAKING CHANGE"; then
-    BUMP="major"
-# Check for release: prefix (minor bump)
-elif echo "$COMMITS" | grep -q "^release:"; then
-    BUMP="minor"
+LAST_NUM=0
+if [ -n "$LAST_TAG" ]; then
+    IFS='.' read -r LM LN LP <<< "${LAST_TAG#v}"
+    LAST_NUM=$((LM * 1000000 + LN * 1000 + LP))
 fi
 
-# Apply bump
-case "$BUMP" in
-    major)
-        MAJOR=$((MAJOR + 1))
-        MINOR=0
-        PATCH=0
-        ;;
-    minor)
-        MINOR=$((MINOR + 1))
-        PATCH=0
-        ;;
-    patch)
-        PATCH=$((PATCH + 1))
-        ;;
-esac
+if [ "$CARGO_NUM" -gt "$LAST_NUM" ]; then
+    # Cargo.toml is already ahead — use it as-is
+    AUTO_VERSION="$CARGO_VERSION"
+    info "Cargo.toml version $CARGO_VERSION is ahead of last tag ${LAST_TAG:-none} — using it directly"
+else
+    # Check if there are any releasable commits (feat, fix, release, BREAKING CHANGE)
+    HAS_RELEASABLE=$(echo "$COMMITS" | grep -cE "^(feat|fix|release|BREAKING CHANGE):" || true)
 
-AUTO_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+    if [ "$HAS_RELEASABLE" -eq 0 ] && [ -z "${1:-}" ]; then
+        info "No releasable commits since $LAST_TAG (only docs/chore/ci/refactor/test). Skipping release."
+        exit 0
+    fi
+
+    BUMP="patch"  # default
+
+    # Check for BREAKING CHANGE (major bump)
+    if echo "$COMMITS" | grep -qi "BREAKING CHANGE"; then
+        BUMP="major"
+    # Check for release: prefix (minor bump)
+    elif echo "$COMMITS" | grep -q "^release:"; then
+        BUMP="minor"
+    fi
+
+    # Apply bump
+    IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
+    case "$BUMP" in
+        major)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+        minor)
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+        patch)
+            PATCH=$((PATCH + 1))
+            ;;
+    esac
+
+    AUTO_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+fi
 
 # Allow manual override
 VERSION="${1:-$AUTO_VERSION}"

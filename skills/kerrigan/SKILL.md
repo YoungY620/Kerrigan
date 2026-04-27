@@ -107,11 +107,13 @@ Every node **must** declare a `--contract` when created. The contract has two pa
 Maps each predecessor node ID to the JSON Schema its `result_summary` must satisfy.
 - Must cover **all** nodes in `--depends-on` (bijection: one schema per predecessor, no extras)
 - Root nodes (no `--depends-on`): omit or pass empty predecessor
+- The `properties` you declare here determine which fields are extracted from the predecessor's output and injected into your prompt. Declare only what you need — extra fields are filtered out.
 
 ### `output` schema
 JSON Schema that **this node's own** `result_summary` must satisfy when marking succeeded.
 - Always required, even for root nodes
 - Use `{"type":"object"}` as minimum if you don't want strict validation
+- This schema is injected into the worker's prompt under `## Your Output Schema` so it sees the required format in-context
 
 ### Contract format
 

@@ -42,7 +42,7 @@ There are two distinct roles. Know which one you are in.
 You are launched by `exec` with a prompt describing your node. Follow this:
 
 1. **Read node details**: `kerrigan dag get --task <task-id> --node <node-id>`
-2. **Read predecessor results**: `get` each predecessor; parse the JSON fields you need
+2. **Read predecessor inputs**: they are already pre-filtered to only the fields you declared in your `contract.predecessor` schema — no need to strip noise yourself. Parse the JSON fields you need.
 3. **Check sufficiency**:
    - Sufficient → proceed
    - Insufficient → fail immediately with a clear `failure_reason`; do not guess

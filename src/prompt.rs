@@ -1,6 +1,32 @@
 use crate::engine::{RegistryEngine, TaskEngine};
 use crate::error::Result;
 
+fn extract_by_schema(
+    result_json: &serde_json::Value,
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    let props: std::collections::HashSet<&str> = schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .map(|obj| obj.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+
+    if props.is_empty() {
+        return result_json.clone();
+    }
+
+    if let Some(obj) = result_json.as_object() {
+        let filtered: serde_json::Map<_, _> = obj
+            .iter()
+            .filter(|(k, _)| props.contains(k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        serde_json::Value::Object(filtered)
+    } else {
+        result_json.clone()
+    }
+}
+
 pub fn build_prompt(
     registry: &RegistryEngine,
     task_engine: &TaskEngine,
@@ -11,20 +37,45 @@ pub fn build_prompt(
     let node = task_engine.get_node(node_id)?;
     let all_nodes = task_engine.list_all()?;
 
-    // Collect predecessor results
+    // Collect predecessor inputs — filtered to declared schema fields
     let mut pred_section = String::new();
     for pred_id in &node.predecessors {
         let pred = task_engine.get_node(pred_id)?;
         pred_section.push_str(&format!("### Node {}: {}\n", pred.id, pred.summary));
-        if let Some(ref result) = pred.metadata.result_summary {
-            pred_section.push_str(&format!("**Result**: {}\n\n", result));
+
+        let schema = node
+            .contract
+            .as_ref()
+            .and_then(|c| c.predecessor.as_ref())
+            .and_then(|p| p.get(pred_id.as_str()));
+
+        if let Some(ref result_str) = pred.metadata.result_summary {
+            let display = if let Some(schema) = schema {
+                if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
+                    let extracted = extract_by_schema(&result_json, schema);
+                    serde_json::to_string_pretty(&extracted).unwrap_or_else(|_| result_str.clone())
+                } else {
+                    result_str.clone()
+                }
+            } else {
+                result_str.clone()
+            };
+            pred_section.push_str(&format!("```json\n{}\n```\n\n", display));
         } else {
-            pred_section.push_str("**Result**: (no result)\n\n");
+            pred_section.push_str("*(no result yet)*\n\n");
         }
     }
     if pred_section.is_empty() {
         pred_section = "No predecessors.\n".to_string();
     }
+
+    // Output schema for this node
+    let output_schema_str = node
+        .contract
+        .as_ref()
+        .and_then(|c| c.output.as_ref())
+        .and_then(|s| serde_json::to_string_pretty(s).ok())
+        .unwrap_or_else(|| "not declared".to_string());
 
     let dag_json = serde_json::to_string_pretty(&all_nodes).unwrap_or_default();
 
@@ -54,8 +105,14 @@ pub fn build_prompt(
 ### Description
 {node_description}
 
-## Predecessor Results
+## Predecessor Inputs
 {pred_section}
+
+## Your Output Schema
+Your `result_summary` must satisfy this JSON Schema:
+```json
+{output_schema_str}
+```
 
 ## DAG Overview
 ```json
@@ -76,7 +133,7 @@ Key commands:
 2. When done, update your node status:
    - Success: `kerrigan dag update --task {task_id} --input '[{{"id":"{node_id}","status":"succeeded","metadata":{{"result_summary":"..."}}}}]'`
    - Failure: `kerrigan dag update --task {task_id} --input '[{{"id":"{node_id}","status":"failed","metadata":{{"failure_reason":"..."}}}}]'`
-3. Use structured result_summary and failure_reason.
+3. `result_summary` must be valid JSON matching Your Output Schema above.
 4. You may add new nodes if you discover additional work needed.
 5. Never hide limitations — disclose all known issues.
 6. When finished, stop."#,
@@ -89,6 +146,7 @@ Key commands:
             &node.description
         },
         pred_section = pred_section.trim(),
+        output_schema_str = output_schema_str,
         dag_json = dag_json,
         skills_path = skills_path,
         guide_path = guide_path,

@@ -22,18 +22,35 @@ Everything else in this guide — decomposition, cross-validation, transparent d
 
 ## Execution Workflow
 
-After receiving a ready node, follow this workflow:
+There are two distinct roles. Know which one you are in.
+
+### Orchestrator workflow (building and dispatching the DAG)
+
+1. **Create the task**: `kerrigan task create --summary "..." --workdir .`
+2. **Build the DAG**: Add nodes with `dag add --contract ...`. Add 1–2 layers at a time; don't over-plan.
+3. **Find ready nodes**: `kerrigan dag ready --task <task-id>`
+4. **Dispatch each ready node to an agent worker**: `kerrigan exec --task <task-id> --node <node-id> --adapter claude`
+   - `exec` sets status → running and launches an agent subprocess
+   - The agent worker reads its own prompt, does the work, and calls `dag update` itself
+   - You do **not** call `dag update` for nodes you exec
+5. **Monitor progress**: `kerrigan watch <task-id>` or poll `dag ready`
+6. **Once a node succeeds**, its successors automatically become ready — loop back to step 3
+7. **Add follow-up nodes** as needed after seeing results: `dag add --depends-on <completed-node>`
+
+### Worker workflow (inside an exec session)
+
+You are launched by `exec` with a prompt describing your node. Follow this:
 
 1. **Read node details**: `kerrigan dag get --task <task-id> --node <node-id>`
-2. **Read the result_summary of all predecessor nodes**: Run `get` for each predecessor; parse the JSON to extract the fields you need
-3. **Determine whether predecessor information is sufficient**:
-   - Sufficient → Proceed with execution
-   - Insufficient → Specify what information is missing in failure_reason, **do not force execution when information is lacking**
+2. **Read predecessor results**: `get` each predecessor; parse the JSON fields you need
+3. **Check sufficiency**:
+   - Sufficient → proceed
+   - Insufficient → fail immediately with a clear `failure_reason`; do not guess
 4. **Execute the task**
-5. **Determine whether derived work is needed**:
-   - New subtasks discovered → Create new nodes using `dag add` (with `--contract`)
-   - Not needed → Continue
-6. **Write back results**: Use `dag update` to write status + JSON result_summary or failure_reason
+5. **Discover follow-up work?** Add new nodes: `dag add --depends-on <your-node-id> --contract ...`
+6. **Write back your result**: `dag update` with `status: "succeeded"` and valid JSON `result_summary`, or `status: "failed"` with `failure_reason`
+
+You do **not** call `exec` from inside a worker — you are already inside one.
 
 ---
 

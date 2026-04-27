@@ -52,11 +52,19 @@ kerrigan dag add --task abc-123 \
     "output": {"type":"object","required":["design"],"properties":{"design":{"type":"string"}}}
   }'
 
-# 4. Execute ready nodes
+# 4. Execute ready nodes — use exec to launch an agent worker
 kerrigan dag ready --task abc-123
-kerrigan dag get --task abc-123 --node <node-id>
-# (do the work, then update with valid JSON result_summary)
-kerrigan dag update --task abc-123 --input '[{"id":"<node-id>","status":"succeeded","metadata":{"result_summary":"{\"endpoints\":[\"/api/login\",\"/api/logout\"]}"}}]'
+# → returns list of ready node IDs
+
+# Launch an agent to execute a node (sets status=running, starts agent subprocess)
+kerrigan exec --task abc-123 --node <node-id> --adapter claude
+
+# The agent reads its own node details, does the work, and writes back:
+#   kerrigan dag update --task abc-123 --input '[{"id":"<node-id>","status":"succeeded",...}]'
+# You do NOT call dag update yourself for nodes you exec — the agent worker handles that.
+
+# Monitor progress
+kerrigan watch abc-123
 ```
 
 ## Command Reference
@@ -86,7 +94,7 @@ kerrigan dag update --task abc-123 --input '[{"id":"<node-id>","status":"succeed
 
 | Command | Description | `data` field |
 |---------|-------------|--------------|
-| `kerrigan exec --task <id> --node <id> [--adapter kimi\|claude] [--detach]` | Execute a node | With --detach: `{pid, session_id, log_path}` |
+| `kerrigan exec --task <id> --node <id> [--adapter kimi\|claude] [--detach]` | **Launch an agent worker for a ready node.** Sets status=running, starts agent subprocess. The agent writes back its own result via `dag update`. | With --detach: `{pid, session_id, log_path}` |
 | `kerrigan send --node <id> --message "..." [--interrupt]` | Message a running agent | `{queued, exec_running, action}` |
 | `kerrigan stop --node <id>` | Stop a running worker | `{stopped: true/false, ...}` |
 | `kerrigan watch <task-id> [--interval 2]` | Stream DAG events (JSONL) | One JSON per line (no envelope) |
@@ -187,9 +195,15 @@ pending  ──→  ready  ──→  running  ──→  succeeded
 ```
 
 - **pending → ready**: Automatic when all predecessors succeeded (or no predecessors)
-- **ready → running**: Set by `kerrigan exec`
-- **running → succeeded**: Set by `kerrigan dag update` with valid result_summary
-- **running → failed**: Set by `kerrigan dag update` with `status: "failed"`
+- **ready → running**: **Only via `kerrigan exec`** — `dag update` cannot set running
+- **running → succeeded**: Set by the agent worker via `kerrigan dag update`
+- **running → failed**: Set by the agent worker via `kerrigan dag update`
+
+**As orchestrator**: you call `exec` to dispatch each ready node to an agent. You never call `dag update` for nodes you exec — the agent handles that itself.
+
+**As worker (inside exec)**: you receive a prompt describing your node, do the work, and call `dag update` to write your result. You do not call `exec`.
+
+Attempting `dag update` with `status: "running"` is an error — only `exec` may do this.
 
 ## dag add — --successor flag
 
@@ -245,6 +259,6 @@ kerrigan dag add --task T --summary "N" \
 2. **Plain-text `result_summary`** — Must be a JSON object (e.g. `'{"summary":"..."}'`), not free text.
 3. **Predecessor map doesn't cover all `--depends-on`** — Every depends-on ID needs a schema entry.
 4. **Forgetting to read predecessor results** — Always `dag get` predecessors before executing.
-5. **Updating a non-running node** — Only `running → succeeded/failed` is valid. Use `exec` first.
+5. **Calling `dag update` instead of `exec`** — As orchestrator, use `exec` to dispatch nodes. `dag update` is for agent workers writing back their own results. `dag update` with `status: "running"` is rejected outright.
 6. **Over-planning the DAG upfront** — Add 1-2 layers, execute, then decide what's next.
 7. **Not using cross-validation** — For important decisions, create multiple independent nodes.

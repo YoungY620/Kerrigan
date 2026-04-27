@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.1.0] - 2026-04-27
+
+### Added
+- NodeContract system with mandatory JSON Schema contracts, syntax validation, subsumption checks, and runtime predecessor/output validation (@patrick)
+- Strict state machine enforcement: only `exec` can transition nodes to Running (@patrick)
+- `dag override` command for recovering from contract creation errors without deleting history (@patrick)
+- SQLite database migration system using PRAGMA user_version (@patrick)
+- `--successor` flag for DAG edges with cycle detection and `cascade_pending` propagation (@patrick)
+- Next.js visualization dashboard (`viz/`) for DAG inspection (@patrick)
+- One-liner install script with public GitHub install script (@patrick)
+- `feishu-research` skill for multi-group chat digests (@patrick)
+
+### Changed
+- AGENTS.md updated with core design decisions: append-only storage, result-as-communication thesis, and current project structure (@patrick)
+- `feishu-research` skill restructured into 6 Types with orthogonal hands-on tag and terminology cleanup (@patrick)
+- README rewritten for single-binary workflow and skill install flow (@patrick)
+- Default agent configuration bundle added with deployment guide (@patrick)
+- Parallel development isolation strategy documented as git worktrees (@patrick)
+
+### Fixed
+- Detach mode child process crash on encountering Running node state (@patrick)
+- Agent binary install path corrected to `kerrigan-agent` (@Kerrigan)
+- CI `check:version` script YAML parsing fixed with block literal (@patrick)
+
+### Removed
+- Output reminder envelope from CLI responses (superseded by NodeContract schema) (@patrick)
+
 ## [1.0.1] - 2026-04-15
 
 ### Added

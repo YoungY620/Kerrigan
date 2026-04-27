@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.1] - 2026-04-27
+
+### Added
+- Structured predecessor input extraction in `build_prompt` (@patrick)
+
+### Changed
+- Clarified exec-vs-dag-update roles in SKILL.md and guide.md (@patrick)
+
+### Fixed
+- Release script now uses Cargo.toml version when it is ahead of last tag (@patrick)
+
 ## [1.1.0] - 2026-04-27
 
 ### Added

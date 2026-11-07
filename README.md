@@ -15,7 +15,7 @@ DAG is the **means**, not the end: dependencies become edges, topological order 
 
 ## Prerequisites
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or Kimi CLI installed and in PATH
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (or another supported agent CLI) installed and in PATH
 - Default adapter: `claude`. Use `--adapter kimi` to switch.
 
 ## Install
@@ -23,7 +23,6 @@ DAG is the **means**, not the end: dependencies become edges, topological order 
 One-liner (clones repo, deploys agent config + skills, optionally builds CLI):
 
 ```bash
-# clone from GitHub (public)
 curl -fsSL \
   "https://raw.githubusercontent.com/YoungY620/Kerrigan/main/scripts/install.sh" | sh
 ```
@@ -31,18 +30,17 @@ curl -fsSL \
 This will:
 
 1. Clone the repo to `~/.kerrigan/.source/`
-2. Deploy `default-agent` config to `~/.kitty/agents/kerrigan-agent/`
+2. Deploy `default-agent` config to `~/.kerrigan/agents/kerrigan-agent/`
 3. Deploy skills to `~/.kerrigan/skills/`
 4. Build the `kerrigan` CLI (if `cargo` is available)
 
 Re-run to update. Then make the skill discoverable by your agent:
 
-- **Kitty Worker**: pass `--skills ~/.kerrigan/skills` when launching the worker
 - **Claude Code**: symlink into the user skills directory
   ```bash
   ln -sfn ~/.kerrigan/skills/kerrigan ~/.claude/skills/kerrigan
   ```
-- **Kimi CLI**: `kerrigan exec` auto-injects `--skills-dir ~/.kerrigan/skills`, no extra config needed
+- **Other adapters**: `kerrigan exec` auto-injects `--skills-dir ~/.kerrigan/skills`
 
 ### Manual install
 
@@ -77,8 +75,10 @@ Full command reference: [`skills/kerrigan/SKILL.md`](skills/kerrigan/SKILL.md).
 
 ```text
 ~/.kerrigan/
+├── .source/                     # cloned source (by install.sh)
+├── agents/kerrigan-agent/       # default-agent config bundle
 ├── registry.db                  # global task registry (SQLite)
-├── skills/kerrigan/             # deployed by `kerrigan init`
+├── skills/kerrigan/             # deployed by install / `kerrigan init`
 │   ├── SKILL.md
 │   ├── guide.md
 │   ├── guide-software-development.md
@@ -95,5 +95,4 @@ Full command reference: [`skills/kerrigan/SKILL.md`](skills/kerrigan/SKILL.md).
 - [Design](docs/design.md) — core design philosophy and architecture
 - [Guide Design](docs/guide-design.md) — guide file system design
 - [Milestone](docs/milestone.md) — roadmap
-- [default-agent/](default-agent/README.md) — Kitty agent bundle + full Feishu deployment walkthrough
-- [implement-a-chain](https://github.com/YoungY620/Kerrigan) — head-to-head experiment against Claude Code agent teams; Kerrigan performs on par
+- [default-agent/](default-agent/README.md) — agent config bundle + Feishu deployment walkthrough

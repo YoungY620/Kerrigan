@@ -42,7 +42,7 @@ description: >
 
 每日 / 每周定时总结是本 skill 的**主场景**之一,不是被排除的特殊情况。周期性任务的接入方式:
 
-- 由 **Kitty 的 `SetReminder`**(cron 表达式)按时触发,每次触发都拉起一个新的 Kerrigan task 跑本 skill 的完整四阶段
+- 由 **agent runtime 的 `SetReminder`**(cron 表达式)按时触发,每次触发都拉起一个新的 Kerrigan task 跑本 skill 的完整四阶段
 - 或由用户手动在飞书里 `@bot 日报` / `@bot 周报` 触发
 - 两种触发方式下,skill 内部执行逻辑完全相同
 
@@ -140,7 +140,7 @@ description: >
 - **Objective**:对群 `{chat_id}` 在 `[T0, T1]` 区间内所有消息,产出(a) 保留 message_id/时间/sender 的**过滤后原文** `./raw/{X}.json`,(b) 该群一句话摘要,(c) **工具提名** `./tool-mentions/{X}.json`(§4.4),(d) 链接清单 `./links/{X}.json`,(e) 图片本地路径 + OCR 结果 `./ocr/{X}.json`
 - **Context**:无前置节点
 - **Scope**:
-  - 用 `kitty_feishu` 的 `list_messages(chat_id, start_time, end_time, count=200)`,分页取完
+  - 用 `agent_feishu` 的 `list_messages(chat_id, start_time, end_time, count=200)`,分页取完
   - 时区换算:先 `date` 确认本地时区,再换算成秒级 Unix 时间戳
   - 过滤规则见 Phase 4
   - 图片下载走 `/im/v1/images/{image_key}`,存 `./figs/{X}-{message_id}.{ext}`
@@ -578,7 +578,7 @@ hands-on-available 会额外派生 `verify-*` 子簇(§6.7),与命中的 Types �
 
 **实现**:
 - 用飞书 Wiki 的 node 层级(`create_wiki_node(parent_node_token=...)`)**或**飞书 Drive 的 folder 嵌套
-- 具体 API 调用参考 `kitty-feishu` 的 `rules/docx.md` / `openplatform-docs.md`,本 skill 只约束**层级关系**
+- 具体 API 调用参考 `agent-feishu` 的 `rules/docx.md` / `openplatform-docs.md`,本 skill 只约束**层级关系**
 - 所有子/孙文档在主文档正文里通过 inline link 呈现 —— **既是 UI 树父子关系,也是正文跳转**
 
 **超长中间产物拆孙子文档**的触发条件(任一满足即拆):
@@ -664,10 +664,10 @@ Stage 4a 产出,**简洁、指路型**。
 输入: md 文件路径 + title + (可选) parent_token
 
 1. 读 md 文件
-2. document_id = kitty_feishu.create_document(title, parent_token=parent_token)
+2. document_id = agent_feishu.create_document(title, parent_token=parent_token)
 3. 扫 md 中所有 ![alt](path):
      对每个本地 PNG/JPG:
-         image_token = kitty_feishu.upload_image(document_id, path)
+         image_token = agent_feishu.upload_image(document_id, path)
          path → image_token 映射入 dict
 4. 解析 md AST,逐节点转飞书 block:
      - # / ## / ### → heading1/2/3 block

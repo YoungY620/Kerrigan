@@ -1,6 +1,6 @@
 # Agent Guidelines
 
-本项目所有 agent（Claude Code、Kimi CLI 等）在操作本仓库时遵守以下规则。
+本项目所有 agent（Claude Code、compatible agent CLI 等）在操作本仓库时遵守以下规则。
 
 ---
 

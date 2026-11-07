@@ -2,7 +2,7 @@
 
 ## Context
 
-将 thinking-space/kerrigan 中与 kitty 耦合的多智能体 swarm 机制，用 Rust 重新实现。按设计文档重新设计，不是直接移植。
+将 thinking-space/kerrigan 中与外部 agent runtime 耦合的多智能体 swarm 机制，用 Rust 重新实现。按设计文档重新设计，不是直接移植。
 
 **Repo 结构**：
 
@@ -144,7 +144,7 @@ kerrigan-storage/
 
 ### Step 4: Agent Adapter（kerrigan-cli）
 
-**目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，首批支持 Claude Code 和 Kimi CLI 两个 adapter，默认 YOLO 模式。
+**目标**：在 kerrigan-cli 中实现 agent CLI 的封装层，首批支持 Claude Code 和 compatible agent CLI 两个 adapter，默认 YOLO 模式。
 
 **文件**：
 
@@ -158,7 +158,7 @@ kerrigan-cli/
 │   │   ├── mod.rs
 │   │   ├── traits.rs      # AgentAdapter trait
 │   │   ├── claude.rs      # Claude Code adapter
-│   │   ├── kimi.rs        # Kimi CLI adapter
+│   │   ├── kimi.rs        # compatible agent CLI adapter
 │   │   └── session.rs     # session id 生成与管理
 │   └── cli/
 │       └── mod.rs
@@ -178,7 +178,7 @@ pub trait AgentAdapter {
 - 支持 `--allowedTools` 和 skills 注入
 - 解析 stdout 为 AgentOutput
 
-**Kimi CLI adapter**：
+**compatible agent CLI adapter**：
 - 调用 `kimi` 的非交互式模式，YOLO 默认开启
 - 支持 session id 指定和 resume
 - 支持 skills 目录注入
@@ -189,7 +189,7 @@ pub trait AgentAdapter {
 - trait 可 mock：用 MockAdapter 测试上层逻辑
 - session id 唯一性
 - Claude adapter 命令行构造正确性（验证 YOLO 标志、session id 等参数）
-- Kimi adapter 命令行构造正确性
+- agent adapter 命令行构造正确性
 - 可选集成测试（需要 claude/kimi 可用）
 
 **验证方式**：`cargo test`

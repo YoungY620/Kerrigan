@@ -6,16 +6,11 @@
 #   curl -fsSL \
 #     "https://raw.githubusercontent.com/YoungY620/Kerrigan/main/scripts/install.sh" | sh
 #
-# What it does (steps 0-3):
+# What it does:
 #   0. Clone (or pull) the kerrigan repo into ~/.kerrigan/.source/
-#   1. Copy default-agent config to ~/.kitty/agents/default-agent/
+#   1. Copy default-agent config to ~/.kerrigan/agents/kerrigan-agent/
 #   2. Copy skills to ~/.kerrigan/skills/
 #   3. Build kerrigan CLI (if cargo is available)
-#
-# Step 4 (starting kitty-worker) is intentionally separate.
-#
-# Environment variables:
-#   No token required for the public GitHub repository
 #
 set -e
 
@@ -30,7 +25,7 @@ error() { printf '\033[1;31m ✗\033[0m  %s\n' "$*" >&2; exit 1; }
 
 REPO_URL="https://github.com/YoungY620/Kerrigan.git"
 SOURCE_DIR="$HOME/.kerrigan/.source"
-AGENT_DIR="$HOME/.kitty/agents/kerrigan-agent"
+AGENT_DIR="$HOME/.kerrigan/agents/kerrigan-agent"
 SKILLS_DIR="$HOME/.kerrigan/skills"
 
 # ── Pre-flight checks ───────────────────────────────────────────────────────
@@ -107,19 +102,12 @@ fi
 echo ""
 info "Kerrigan installed successfully!"
 echo ""
-echo "  Source:      $SOURCE_DIR"
-echo "  Agent:       $AGENT_DIR"
-echo "  Skills:      $SKILLS_DIR"
+echo "  Source:  $SOURCE_DIR"
+echo "  Agent:   $AGENT_DIR"
+echo "  Skills:  $SKILLS_DIR"
 echo ""
-echo "  To start a worker, run:"
-echo ""
-echo "    uvx --extra-index-url https://pypi.org/simple \\"
-echo "      --from kitty-worker@latest \\"
-echo "      kitty-worker-auto \\"
-echo "      --server <SERVER_HOST>:8765 \\"
-echo "      --chat-in '<CHAT_IDS>' \\"
-echo "      --agent $AGENT_DIR \\"
-echo "      --skills $SKILLS_DIR"
+echo "  Make the skill visible to Claude Code:"
+echo "    ln -sfn $SKILLS_DIR/kerrigan ~/.claude/skills/kerrigan"
 echo ""
 echo "  To update, re-run this script."
 echo ""

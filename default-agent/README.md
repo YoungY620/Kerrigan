@@ -1,14 +1,14 @@
 # Kerrigan default-agent 安装指导
 
-本目录是一个自定义的 Kitty Agent 配置包,包含:
+本目录是一个自定义的 agent 配置包,包含:
 
 | 文件 | 作用 |
 |---|---|
 | `agent.yaml` | 主 Agent 配置:名称、工具列表、subagent 定义 |
 | `sub.yaml` | Subagent 配置:继承主 Agent,排除 agent/todo/mail 工具,适合并行任务 |
-| `system.md` | 系统提示词模板(会被 Worker 运行时注入 `${KITTY_*}` / `${KIMI_*}` 变量) |
+| `system.md` | 系统提示词模板(会被 Worker 运行时注入 `${AGENT_*}` 变量) |
 
-本文档指导**AI agent 或运维人员**如何把这套配置部署到 Kitty 上。按下面两个场景二选一。
+本文档指导**AI agent 或运维人员**如何把这套配置部署到 agent runtime 上。按下面两个场景二选一。
 
 ---
 
@@ -19,7 +19,7 @@
 - 已安装 `tmux`(进程托管)
 - 可访问 `https://pypi.org/simple`
 - 飞书应用(已开通 `im:message` / `im:chat` / `docx:document` / `drive:drive` 等权限,记下 `App ID` 和 `App Secret`)
-- `~/.kimi/config.toml` 已配好模型 + Provider(让运维提供,或参考 kitty 官方文档)
+- `~/.kerrigan/config.toml` 已配好模型 + Provider(让运维提供,或参考 官方文档)
 
 ---
 
@@ -34,7 +34,7 @@
 | `kerrigan` | `skills/kerrigan/` | **必须** | DAG 任务分解方法论,`system.md` 强制引用 |
 | `feishu-research` | `skills/feishu-research/` | **强烈推荐** | 飞书多群聊调研任务,典型主场景 |
 
-Worker 内置的 Skills(无需额外安装):`kitty-feishu` / `kitty-manager` / `kitty-help`。
+Worker 内置的 Skills(无需额外安装):`agent-feishu` / `agent-manager` / `agent-help`。
 
 ### 部署到 Worker 可访问的位置
 
@@ -81,30 +81,30 @@ ls ~/.kerrigan/skills/kerrigan/SKILL.md  ~/.kerrigan/skills/feishu-research/SKIL
 # 两个文件都能 stat
 ```
 
-Worker 启动后,Agent 会通过 `${KIMI_SKILLS}` 变量在系统提示词里看到已加载的 skill 清单。Worker 日志里也会打印 `Loaded skills: [kerrigan, feishu-research, kitty-feishu, ...]`。
+Worker 启动后,Agent 会通过 `${AGENT_SKILLS}` 变量在系统提示词里看到已加载的 skill 清单。Worker 日志里也会打印 `Loaded skills: [kerrigan, feishu-research, agent-feishu, ...]`。
 
 ---
 
-## 公共步骤:部署 default-agent 到 Kitty 约定位置
+## 公共步骤:部署 default-agent 到 约定位置
 
-Worker 从 `--agent <path>` 读取 Agent 配置。惯例位置是 `~/.kitty/agents/<name>/`。
+Worker 从 `--agent <path>` 读取 Agent 配置。惯例位置是 `~/.kerrigan/agents/<name>/`。
 
 把本目录复制(或软链接)过去:
 
 ```bash
 # 方式 A: 拷贝一份(后续改动需要同步)
-mkdir -p ~/.kitty/agents
-cp -r /path/to/kerrigan/default-agent ~/.kitty/agents/default-agent
+mkdir -p ~/.kerrigan/agents
+cp -r /path/to/kerrigan/default-agent ~/.kerrigan/agents/default-agent
 
 # 方式 B: 软链接(改动实时生效,推荐开发场景用)
-mkdir -p ~/.kitty/agents
-ln -sfn /path/to/kerrigan/default-agent ~/.kitty/agents/default-agent
+mkdir -p ~/.kerrigan/agents
+ln -sfn /path/to/kerrigan/default-agent ~/.kerrigan/agents/default-agent
 ```
 
 验证:
 
 ```bash
-ls ~/.kitty/agents/default-agent/
+ls ~/.kerrigan/agents/default-agent/
 # 应看到: agent.yaml  sub.yaml  system.md
 ```
 
@@ -117,14 +117,14 @@ ls ~/.kitty/agents/default-agent/
 ### A.1 启动 Server
 
 ```bash
-tmux new-session -d -s kitty-server
-tmux send-keys -t kitty-server:0 "
-KITTY_FEISHU_APP_ID=cli_xxxxxxxxxx \
-KITTY_FEISHU_APP_SECRET=your_app_secret \
-KITTY_TRANSFER_MODE=base64 \
+tmux new-session -d -s agent-server
+tmux send-keys -t agent-server:0 "
+AGENT_FEISHU_APP_ID=cli_xxxxxxxxxx \
+AGENT_FEISHU_APP_SECRET=your_app_secret \
+AGENT_TRANSFER_MODE=base64 \
 uvx --extra-index-url https://pypi.org/simple \
-  kitty-server@latest \
-  2>&1 | tee -a ~/.kitty/logs/server.log
+  agent-server@latest \
+  2>&1 | tee -a ~/.kerrigan/logs/server.log
 " Enter
 ```
 
@@ -134,20 +134,20 @@ uvx --extra-index-url https://pypi.org/simple \
 
 ### A.2 启动自定义 Worker(含本 Agent 配置)
 
-先完成上面的"公共步骤"把 `default-agent/` 放到 `~/.kitty/agents/default-agent/`。
+先完成上面的"公共步骤"把 `default-agent/` 放到 `~/.kerrigan/agents/default-agent/`。
 
 ```bash
-tmux new-window -t kitty-server: -n kitty-worker
-tmux send-keys -t kitty-server:kitty-worker "
+tmux new-window -t agent-server: -n agent-worker
+tmux send-keys -t agent-server:agent-worker "
 uvx --extra-index-url https://pypi.org/simple \
-  --from kitty-worker@latest \
-  kitty-worker-auto \
+  --from agent-worker@latest \
+  agent-worker-auto \
   --server localhost:8765 \
   --chat-in '<CHAT_IDS>' \
-  --agent ~/.kitty/agents/default-agent \
+  --agent ~/.kerrigan/agents/default-agent \
   --skills ~/.kerrigan/skills \
-  --config ~/.kimi/config.toml \
-  2>&1 | tee -a ~/.kitty/logs/worker.log
+  --config ~/.kerrigan/config.toml \
+  2>&1 | tee -a ~/.kerrigan/logs/worker.log
 " Enter
 ```
 
@@ -165,22 +165,22 @@ uvx --extra-index-url https://pypi.org/simple \
 
 ### B.2 完成"公共步骤"部署 `default-agent/`
 
-见上面公共步骤,把本目录放到 `~/.kitty/agents/default-agent/`。
+见上面公共步骤,把本目录放到 `~/.kerrigan/agents/default-agent/`。
 
 ### B.3 启动 Worker
 
 ```bash
-tmux new-session -d -s kitty-worker
-tmux send-keys -t kitty-worker "
+tmux new-session -d -s agent-worker
+tmux send-keys -t agent-worker "
 uvx --extra-index-url https://pypi.org/simple \
-  --from kitty-worker@latest \
-  kitty-worker-auto \
+  --from agent-worker@latest \
+  agent-worker-auto \
   --server <SERVER_HOST>:<SERVER_PORT> \
   --chat-in '<CHAT_IDS>' \
-  --agent ~/.kitty/agents/default-agent \
+  --agent ~/.kerrigan/agents/default-agent \
   --skills ~/.kerrigan/skills \
-  --config ~/.kimi/config.toml \
-  2>&1 | tee -a ~/.kitty/logs/worker.log
+  --config ~/.kerrigan/config.toml \
+  2>&1 | tee -a ~/.kerrigan/logs/worker.log
 " Enter
 ```
 
@@ -194,13 +194,13 @@ Worker 连上后,日志会出现 `Connected to ws://<server>:<port>/ws/worker?id
 |---|---|---|
 | `--server` | Server 的 `host:port` | `localhost:8765` 或 `10.x.x.x:8765` |
 | `--chat-in` | 本 Worker 监听的飞书 ID 列表(**必填**),逗号分隔;`ou_xxx` 是用户 open_id(p2p),`oc_xxx` 是群聊 chat_id | `ou_183d6bee7ad...,oc_48b5af2a2fc...` |
-| `--agent` | 本 Agent 目录路径(即放置 `default-agent/` 的位置) | `~/.kitty/agents/default-agent` |
+| `--agent` | 本 Agent 目录路径(即放置 `default-agent/` 的位置) | `~/.kerrigan/agents/default-agent` |
 | `--skills` | Skills 目录路径(包含 `kerrigan/` / `feishu-research/` 等 Skill 子目录) | `~/.kerrigan/skills` |
-| `--config` | kimi-cli 配置文件路径(模型 + Provider 定义) | `~/.kimi/config.toml` |
+| `--config` | agent-cli 配置文件路径(模型 + Provider 定义) | `~/.kerrigan/config.toml` |
 
 ### 关于 `--chat-in`(重要)
 
-**一个 Kitty Server 下的同一个 workspace 只能运行一个 Worker**。不要用两个共享 workspace 的 Worker 分别处理不同 chat——否则后启动的 Worker 会覆盖前者的 Session 映射,触发 `403: session not owned by this worker`。
+**一个 Agent server 下的同一个 workspace 只能运行一个 Worker**。不要用两个共享 workspace 的 Worker 分别处理不同 chat——否则后启动的 Worker 会覆盖前者的 Session 映射,触发 `403: session not owned by this worker`。
 
 正确做法:把你要处理的**所有**飞书 ID(用户 + 群)合并到这一个 Worker 的 `--chat-in` 里。例如:
 
@@ -225,7 +225,7 @@ Worker 连上后,日志会出现 `Connected to ws://<server>:<port>/ws/worker?id
 
 ## 验证 Worker 就绪
 
-1. **日志层**:`~/.kitty/logs/worker.log` 出现
+1. **日志层**:`~/.kerrigan/logs/worker.log` 出现
    ```
    Connected to ws://<server>/ws/worker?ids=ou_xxx,oc_xxx
    Applied S3 storage path from server: ...
@@ -245,12 +245,12 @@ Worker 连上后,日志会出现 `Connected to ws://<server>:<port>/ws/worker?id
 - 改 `system.md` 的系统提示词 → **下一轮对话自动生效**(Worker 在每轮开始时重新渲染模板)
 - 改 `agent.yaml` 工具列表 / subagent 定义 → **需要重启 Worker**
 - 改 `sub.yaml` → 同上
-- 改 `~/.kimi/config.toml` 模型配置 → **需要重启 Worker**
+- 改 `~/.kerrigan/config.toml` 模型配置 → **需要重启 Worker**
 
-重启命令(kitty-worker-auto 会自动重启):
+重启命令(agent-worker-auto 会自动重启):
 
 ```bash
-tmux send-keys -t kitty-worker 'C-c' && sleep 2
+tmux send-keys -t agent-worker 'C-c' && sleep 2
 # 再按上面的启动命令重新 send-keys
 ```
 
@@ -258,5 +258,5 @@ tmux send-keys -t kitty-worker 'C-c' && sleep 2
 
 ## 参考
 
-- Worker / Server 源码 + 完整参数:`kitty-worker --help` / `kitty-server --help`
-- Kitty 框架仓库:`https://github.com/YoungY620/Kerrigan`
+- Worker / Server 源码 + 完整参数:`agent-worker --help` / `agent-server --help`
+- agent runtime仓库:`https://github.com/YoungY620/Kerrigan`

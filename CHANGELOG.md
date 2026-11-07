@@ -20,7 +20,7 @@
 - SQLite database migration system using PRAGMA user_version (@patrick)
 - `--successor` flag for DAG edges with cycle detection and `cascade_pending` propagation (@patrick)
 - Next.js visualization dashboard (`viz/`) for DAG inspection (@patrick)
-- One-liner install script with public GitHub install script (@patrick)
+- One-liner install script for public GitHub repository (@patrick)
 - `feishu-research` skill for multi-group chat digests (@patrick)
 
 ### Changed

@@ -28,12 +28,7 @@ error() { printf '\033[1;31m ✗\033[0m  %s\n' "$*" >&2; exit 1; }
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-# Public GitHub clone URL
-if false; then  # legacy private-token branch removed
-    REPO_URL="https://github.com/YoungY620/Kerrigan.git"
-else
-    REPO_URL="https://github.com/YoungY620/Kerrigan.git"
-fi
+REPO_URL="https://github.com/YoungY620/Kerrigan.git"
 SOURCE_DIR="$HOME/.kerrigan/.source"
 AGENT_DIR="$HOME/.kitty/agents/kerrigan-agent"
 SKILLS_DIR="$HOME/.kerrigan/skills"
